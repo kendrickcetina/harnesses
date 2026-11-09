@@ -111,10 +111,30 @@ class ScriptedEngine(Engine):
         return gen
 
 
+def stop_token_ids(tokenizer, model) -> list[int]:
+    """Token ids that end a generation.
+
+    Qwen3.5 repos ship no ``generation_config.json``, so ``generate()`` only stops at the
+    config's ``<|endoftext|>``, not at ``<|im_end|>`` (end of turn). The model then often
+    invents new user/assistant turns until max_tokens. Stop at both.
+    """
+    eos = model.generation_config.eos_token_id
+    ids = set(eos if isinstance(eos, list) else [eos])
+    ids.add(tokenizer.eos_token_id)
+    if "<|im_end|>" in tokenizer.get_vocab():
+        ids.add(tokenizer.convert_tokens_to_ids("<|im_end|>"))
+    return sorted(i for i in ids if isinstance(i, int) and i >= 0)
+
+
 def pick_device() -> str:
     import torch
 
     if torch.cuda.is_available():
+        # cuDNN's attention backend re-plans its graph for every new sequence length: ~40 ms of
+        # CPU per attention layer per generated token on Hopper GPUs (Qwen3.5-4B: 2.6 instead of
+        # ~36 tokens/s). Token-by-token generation changes the length every step, so use the
+        # flash / memory-efficient SDPA backends instead.
+        torch.backends.cuda.enable_cudnn_sdp(False)
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
@@ -137,6 +157,7 @@ class TransformersEngine(Engine):
         # Qwen3.5 checkpoints are multimodal; AutoModelForCausalLM loads the text part only.
         self.model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype).to(self.device).eval()
         self.lock = threading.Lock()
+        self.stop_ids = stop_token_ids(self.tokenizer, self.model)
         n_params = sum(p.numel() for p in self.model.parameters()) / 1e9
         print(f"Loaded {model_id} ({n_params:.2f}B params) on {self.device} in {time.time() - t0:.0f}s")
 
@@ -179,6 +200,7 @@ class TransformersEngine(Engine):
             max_new_tokens=max_new,
             do_sample=temperature > 0,
             pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+            eos_token_id=self.stop_ids,
         )
         if temperature > 0:
             kwargs.update(temperature=temperature, top_p=request.top_p or (0.95 if request.thinking else 0.8), top_k=20)
@@ -196,6 +218,7 @@ class TransformersEngine(Engine):
             thread = threading.Thread(target=run, daemon=True)
             thread.start()
             produced = ""
+            finished = False  # True once the streamer's end-of-stream signal was consumed
             try:
                 for piece in streamer:
                     if not piece:
@@ -206,14 +229,20 @@ class TransformersEngine(Engine):
                         yield piece[: len(piece) - (len(produced) - cut)]
                         break
                     yield piece
+                else:
+                    finished = True
             finally:
                 cancel.flag = True
-                for _ in streamer:  # drain so generate() can finish
-                    pass
+                if not finished:
+                    # Stopped early (stop sequence, turn over, client gone): drain so generate()
+                    # can finish. Draining a finished streamer would block forever on its empty queue.
+                    for _ in streamer:
+                        pass
                 thread.join()
-            gen.completion_tokens = len(self.tokenizer(produced)["input_ids"])
-            gen.finish_reason = "length" if gen.completion_tokens >= max_new else "stop"
-            gen.seconds = time.time() - t0
+                # Also when closed early (GeneratorExit), so the usage numbers stay right.
+                gen.completion_tokens = len(self.tokenizer(produced)["input_ids"])
+                gen.finish_reason = "length" if gen.completion_tokens >= max_new else "stop"
+                gen.seconds = time.time() - t0
 
         gen.deltas = deltas()
         return gen

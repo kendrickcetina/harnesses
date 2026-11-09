@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from functools import cache
 from pathlib import Path
 
 from harness_lab import config
@@ -33,16 +34,53 @@ def _mcp_command() -> dict:
     }
 
 
+def _env_with_project_python() -> dict[str, str]:
+    """Our environment, with the project's Python first on PATH: when a harness runs
+    ``python3`` in its shell it gets pandas, openpyxl and python-docx from ``.venv``."""
+    path = os.pathsep.join([str(Path(sys.executable).parent), os.environ.get("PATH", "")])
+    return {**os.environ, "PATH": path}
+
+
+def codex_sandbox_enabled() -> bool:
+    """Codex runs commands in its sandbox unless you opt out with HARNESS_CODEX_SANDBOX=off."""
+    return os.environ.get("HARNESS_CODEX_SANDBOX", "on").lower() != "off"
+
+
+@cache
+def codex_sandbox_works() -> bool:
+    """Can Codex's Linux sandbox run a command here?
+
+    It needs bubblewrap (``bwrap``) and permission to create mounts. Inside some containers
+    (e.g. code-server on the DGX) bwrap cannot mount its new root: every command the model
+    runs fails, and a small model just retries until the timeout. Checked once per session.
+    """
+    if sys.platform != "linux" or not shutil.which("codex"):
+        return True
+    CODEX_HOME.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            ["codex", "sandbox", "-c", 'sandbox_mode="workspace-write"', "--", "true"],
+            env={**os.environ, "CODEX_HOME": str(CODEX_HOME)},
+            capture_output=True,
+            timeout=60,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 def codex_env(model: str | None = None, mcp: bool = True) -> dict[str, str]:
     """Write ``.codex_home/config.toml`` and return the environment that selects it."""
     CODEX_HOME.mkdir(parents=True, exist_ok=True)
     mcp_cfg = _mcp_command()
+    sandbox = "workspace-write" if codex_sandbox_enabled() else "danger-full-access"
     lines = [
         f'model = "{model or config.MODEL_ID}"',
         'model_provider = "local"',
         "model_context_window = 32768",
         'approval_policy = "never"',
-        'sandbox_mode = "workspace-write"',
+        f'sandbox_mode = "{sandbox}"',
         "",
         "[model_providers.local]",
         'name = "Local Qwen (harness-lab)"',
@@ -60,7 +98,7 @@ def codex_env(model: str | None = None, mcp: bool = True) -> dict[str, str]:
             'default_tools_approval_mode = "approve"',
         ]
     (CODEX_HOME / "config.toml").write_text("\n".join(lines) + "\n")
-    return {**os.environ, "CODEX_HOME": str(CODEX_HOME), "HARNESS_API_KEY": config.API_KEY}
+    return {**_env_with_project_python(), "CODEX_HOME": str(CODEX_HOME), "HARNESS_API_KEY": config.API_KEY}
 
 
 def claude_env(model: str | None = None) -> dict[str, str]:
@@ -68,7 +106,7 @@ def claude_env(model: str | None = None) -> dict[str, str]:
     CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
     model = model or config.MODEL_ID
     return {
-        **os.environ,
+        **_env_with_project_python(),
         "CLAUDE_CONFIG_DIR": str(CLAUDE_HOME),
         "ANTHROPIC_BASE_URL": config.BASE_URL.removesuffix("/v1"),
         "ANTHROPIC_AUTH_TOKEN": config.API_KEY,
@@ -109,6 +147,14 @@ def run_codex(prompt: str, model: str | None = None, mcp: bool = True, timeout: 
     """``codex exec``: one non-interactive task in the workspace."""
     if not shutil.which("codex"):
         return "codex not found: run scripts/install_clis.sh (or npm i -g @openai/codex)"
+    if codex_sandbox_enabled() and not codex_sandbox_works():
+        return (
+            "El sandbox de Codex (bubblewrap) no funciona en este entorno: cada comando fallaría y el "
+            "modelo reintentaría hasta el timeout. Si este entorno ya está aislado (p. ej. un contenedor) "
+            "y aceptas que Codex ejecute comandos sin sandbox, define HARNESS_CODEX_SANDBOX=off."
+        )
+    if not codex_sandbox_enabled():
+        print("Aviso: HARNESS_CODEX_SANDBOX=off, Codex ejecuta los comandos sin sandbox.")
     cmd = ["codex", "exec", "--skip-git-repo-check", "-C", str(config.WORKSPACE_DIR), prompt]
     return _run(cmd, codex_env(model, mcp), timeout)
 

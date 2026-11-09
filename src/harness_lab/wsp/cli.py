@@ -11,6 +11,10 @@ uv run harness-wsp edit --model Qwen/Qwen3.5-0.8B --layers 15 19 --columns 64
 
 # Your ARCA model (base + GRPO LoRA adapter):
 uv run harness-wsp probe --model Qwen/Qwen3-0.6B --adapter ../dgm-arca/rlm/weights/final_rlm_lora
+
+# What did GRPO change? Merge the LoRA into the base model, then read the difference
+uv run harness-wsp merge --model Qwen/Qwen3-0.6B --adapter ../dgm-arca/rlm/weights/final_rlm_lora
+uv run harness-wsp diff Qwen/Qwen3-0.6B outputs/wsp/merged
 """
 
 from __future__ import annotations
@@ -30,7 +34,9 @@ def load_model(model_id: str, adapter: str | None = None):
 
     device = pick_device()
     dtype = torch.float32 if device == "cpu" else torch.bfloat16
-    tokenizer = AutoTokenizer.from_pretrained(adapter or model_id)
+    # An adapter folder may carry its own tokenizer (e.g. new special tokens); often it does not.
+    has_tokenizer = adapter and any((Path(adapter) / f).exists() for f in ("tokenizer.json", "tokenizer_config.json"))
+    tokenizer = AutoTokenizer.from_pretrained(adapter if has_tokenizer else model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, dtype=dtype)
     if adapter:  # merge the LoRA so the edit acts on the weights the model really uses
         from peft import PeftModel
@@ -43,6 +49,14 @@ def cmd_diff(args) -> None:
     from harness_lab.wsp.diff import compare_checkpoints, format_report
 
     print(format_report(compare_checkpoints(args.base, args.edited)))
+
+
+def cmd_merge(args) -> None:
+    model, tok = load_model(args.model, args.adapter)
+    out = Path(args.out)
+    model.save_pretrained(out)
+    tok.save_pretrained(out)
+    print(f"Saved {args.model} + {args.adapter} (merged) to {out}")
 
 
 def cmd_probe(args):
@@ -61,17 +75,34 @@ def cmd_probe(args):
     return model, tok, result
 
 
+def split_answers(result, split: str) -> tuple[list[str], list[str]]:
+    """Answers to remove (bad) and to keep (good).
+
+    * ``loops``: truncated or repeating vs finished, the failure of the weight-space
+      programming post.
+    * ``errors``: wrong vs right according to the answer check (your verifier in ARCA).
+    """
+    from harness_lab.wsp.probe import looks_looping
+
+    if split == "errors":
+        flags = result.correct
+    else:
+        flags = [not (t or looks_looping(o)) for o, t in zip(result.outputs, result.truncated, strict=True)]
+    bad = [o for o, ok in zip(result.outputs, flags, strict=True) if not ok]
+    good = [o for o, ok in zip(result.outputs, flags, strict=True) if ok]
+    return bad, good
+
+
 def cmd_edit(args) -> None:
     from harness_lab.wsp.edit import apply_edit, find_direction
-    from harness_lab.wsp.probe import load_practice, looks_looping, run_probe
+    from harness_lab.wsp.probe import load_practice, run_probe
 
     model, tok, before = cmd_probe(args)
-    bad = [o for o, t in zip(before.outputs, before.truncated, strict=True) if t or looks_looping(o)]
-    good = [o for o, t in zip(before.outputs, before.truncated, strict=True) if not (t or looks_looping(o))]
+    bad, good = split_answers(before, args.split)
     if len(bad) < 2 or len(good) < 2:
         print(
-            f"Need at least 2 looping and 2 clean answers (got {len(bad)} / {len(good)}). "
-            "Raise --n or lower --max-new-tokens."
+            f"Need at least 2 bad and 2 good answers to find a direction (got {len(bad)} / {len(good)}, "
+            f"--split {args.split}). Raise --n, change --max-new-tokens or try the other --split."
         )
         return
     direction = find_direction(model, tok, bad, good, layer=args.direction_layer or args.layers[0])
@@ -97,6 +128,7 @@ def cmd_edit(args) -> None:
                 "base": args.model,
                 "adapter": args.adapter,
                 "layers": args.layers,
+                "split": args.split,
                 "columns": edited,
                 "before": before.summary(),
                 "after": after.summary(),
@@ -116,6 +148,12 @@ def main() -> None:
     d.add_argument("edited", nargs="?", default=config.WSP_EDITED_MODEL_ID)
     d.set_defaults(func=cmd_diff)
 
+    m = sub.add_parser("merge", help="merge a LoRA adapter into its base model and save it (to diff it)")
+    m.add_argument("--model", required=True, help="base model, e.g. Qwen/Qwen3-0.6B")
+    m.add_argument("--adapter", required=True, help="LoRA adapter folder")
+    m.add_argument("--out", default=str(config.OUTPUTS_DIR / "wsp" / "merged"))
+    m.set_defaults(func=cmd_merge)
+
     for name, func in (("probe", cmd_probe), ("edit", cmd_edit)):
         p = sub.add_parser(name)
         p.add_argument("--model", default=config.WSP_BASE_MODEL_ID)
@@ -130,6 +168,12 @@ def main() -> None:
             p.add_argument("--layers", type=int, nargs="+", default=[15, 19])
             p.add_argument("--direction-layer", type=int, default=None)
             p.add_argument("--columns", type=int, default=64)
+            p.add_argument(
+                "--split",
+                choices=["loops", "errors"],
+                default="loops",
+                help="what counts as a bad answer: loops/truncated (the post) or wrong answers",
+            )
             p.add_argument("--out", default=str(config.OUTPUTS_DIR / "wsp" / "edited"))
 
     args = parser.parse_args()

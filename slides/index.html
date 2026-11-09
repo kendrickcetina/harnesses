@@ -193,6 +193,74 @@
     · <a href="https://github.com/deepseek-ai/deepseek-harness">github.com/deepseek-ai/deepseek-harness</a></p>
 </section>
 
+<!-- 5b -->
+<section class="slide">
+  <h2>Cómo usamos DeepSeek Harness</h2>
+  <div class="flow">
+    <div class="box"><b>Notebook</b><code>dsh.run_task(...)</code></div>
+    <div class="arrow">→</div>
+    <div class="box"><b>SDK Python</b><code>DeepSeekHarness</code><br>runtime nativo (sin Node)</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>POST /v1/messages</b>formato Anthropic</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Servidor local</b>Qwen3.5-4B</div>
+  </div>
+  <div class="box dash"><b>El runtime ejecuta las tools que pide Qwen</b>
+    las del perfil (<code>bash</code>, …) y las nuestras por MCP: <code>mcp__lab__create_word_document</code>, …</div>
+  <h3>Por qué DeepSeek Harness</h3>
+  <ul>
+    <li><b>Abierto (MIT)</b>: se puede leer el bucle y ver exactamente qué envía al modelo.</li>
+    <li><b>Todo es un plugin</b>: lo adaptamos con un <em>patch</em> YAML, sin modificar ni forkear su código.</li>
+    <li><b>Perfiles</b>: <code>sdk-minimal</code> (3 tools) cabe en el contexto de un modelo de 4B; <code>sdk</code> para tareas grandes.</li>
+    <li><b>Proveedor configurable</b>: su adaptador acepta cualquier URL, así que el modelo corre en local.</li>
+    <li><b>MCP nativo</b>: nuestras tools de Word son las mismas que usan Codex y Claude Code.</li>
+    <li><b>SDK Python</b>: se instala con <code>uv sync</code>, se controla desde el notebook y emite eventos
+      (<code>tool/call</code>, <code>tool/result</code>) que mostramos en vivo.</li>
+  </ul>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/dsh.py">dsh.py · run_task</a>
+    · Tutorial, sección 4</p>
+</section>
+
+<!-- 5c -->
+<section class="slide">
+  <h2>Qué adaptamos en nuestro código</h2>
+  <table>
+    <tr><th>Problema</th><th>Qué hicimos</th><th>Dónde</th></tr>
+    <tr><td>DeepSeek Harness espera la API de DeepSeek</td>
+      <td>Su adaptador habla Anthropic Messages: apuntamos <code>base_url</code> al servidor local, que implementa
+        <code>/v1/messages</code> y <code>/v1/messages/count_tokens</code> (también en streaming)</td>
+      <td><a class="code" href="../src/harness_lab/server/anthropic_messages.py">anthropic_messages.py</a></td></tr>
+    <tr><td>Qwen no devuelve JSON, escribe texto</td>
+      <td>El servidor convierte <code>&lt;tool_call&gt;&lt;function=…&gt;</code> en bloques <code>tool_use</code>,
+        y los <code>tool_result</code> del harness en mensajes que entiende la plantilla de Qwen</td>
+      <td><a class="code" href="../src/harness_lab/server/toolcalls.py">toolcalls.py</a></td></tr>
+    <tr><td>Queremos tools propias</td>
+      <td>El patch inserta el plugin <code>dsh-mcp-client</code> con nuestro servidor MCP <code>lab</code> (stdio)</td>
+      <td><a class="code" href="../src/harness_lab/dsh.py">write_patch</a> ·
+        <a class="code" href="../src/harness_lab/tools/mcp_server.py">mcp_server.py</a></td></tr>
+    <tr><td>Telemetría hacia DeepSeek</td>
+      <td>El patch desactiva <code>session-log-deepseek</code> y <code>plugin-package-inventory-deepseek</code></td>
+      <td><a class="code" href="../src/harness_lab/dsh.py">write_patch</a></td></tr>
+    <tr><td>Un modelo de 4B se pierde fácilmente</td>
+      <td>System prompt corto (<code>DSH_SYSTEM_PROMPT</code>), contexto de 32k (<code>DSH_CONTEXT_WINDOW</code>),
+        perfil <code>sdk-minimal</code> por defecto, thinking desactivado (<code>reasoning_effort="off"</code>)</td>
+      <td><a class="code" href="../src/harness_lab/dsh.py">run_task</a></td></tr>
+    <tr><td>No ensuciar el repo ni el <code>$HOME</code></td>
+      <td>El harness trabaja en <code>workspace/</code>; sesiones en <code>.dsh_home/&lt;perfil&gt;</code>
+        (cada perfil guarda las sesiones en un formato distinto)</td>
+      <td><a class="code" href="../src/harness_lab/dsh.py">run_task</a></td></tr>
+    <tr><td>Ver qué hace el harness</td>
+      <td><code>describe()</code> convierte los eventos en líneas legibles; el servidor guarda cada petición</td>
+      <td><a class="code" href="../src/harness_lab/dsh.py">describe</a> ·
+        <a class="code" href="../src/harness_lab/traffic.py">traffic.py</a></td></tr>
+    <tr><td>Está en <em>developer preview</em></td>
+      <td>Versión fijada: <code>deepseek-harness-sdk==0.2.1rc2</code></td>
+      <td><a class="code" href="../pyproject.toml">pyproject.toml</a></td></tr>
+  </table>
+  <p class="ref">Tests sin GPU: <a class="code" href="../tests/test_harnesses_e2e.py">test_harnesses_e2e.py</a>
+    (DeepSeek Harness de verdad + MCP + Word con un modelo simulado)</p>
+</section>
+
 <!-- 6 -->
 <section class="slide">
   <h2>Cómo lo montamos</h2>
@@ -269,61 +337,159 @@ def create_word_document(
 
 <!-- 9 -->
 <section class="slide">
+  <p class="muted">Aparte · no forma parte de la práctica de harnesses</p>
   <h2>Weight-space programming</h2>
-  <p>Un LLM frontera, dentro de un harness con kernel de Python y unas pocas <em>forward passes</em>
-    como tool, <b>lee y escribe los pesos</b> de otra red. Sin gradientes ni pérdida.</p>
+  <p class="lead">Mejorar un modelo <b>editando directamente sus pesos</b>, sin gradientes ni
+    entrenamiento: se diagnostica un fallo, se localiza en los pesos y se corrige con una
+    operación pequeña y explícita.</p>
+  <div class="flow">
+    <div class="box"><b>1. Diagnosticar</b>un fallo medible</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>2. Localizar</b>qué capas y qué dirección</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>3. Editar</b>pocas columnas</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>4. Medir</b>en datos no usados</div>
+  </div>
   <div class="cols">
     <div>
-      <h3>Caso Qwen3.5-0.8B (según el post)</h3>
+      <h3>El caso Qwen3.5-0.8B</h3>
       <ul class="small">
-        <li>Fallo: bucles hasta agotar 32k tokens (93 % de respuestas).</li>
-        <li>Edición: restar una dirección de 64 columnas de las MLP de las capas 15 y 19.
-          131.072 pesos, 0,016 % del modelo.</li>
-        <li>MATH-500 7,9 % → 48,1 % · GSM8K 13,8 % → 67,1 %.</li>
-        <li>En Gemma 3 270M, que no entra en bucles, no mejora: quita obstáculos, no añade capacidades.</li>
+        <li><b>Fallo</b>: 85 de sus primeras 96 respuestas de práctica llegaban al límite de
+          32.768 tokens. El modelo entraba en bucles.</li>
+        <li><b>Dónde</b>: una dirección <code>u</code> que escriben las MLP de las capas 15 y 19.</li>
+        <li><b>Edición</b>: restar <code>u</code> de 64 columnas de cada una de esas MLP.
+          131.072 pesos: el 0,016 % del modelo.</li>
       </ul>
+      <p class="small muted">En el post el diagnóstico lo hace un LLM grande que analiza los pesos
+        con código. Vosotros lo haréis con los scripts del repositorio.</p>
     </div>
     <div>
+      <h3>Resultado</h3>
       <table class="small">
-        <tr><th></th><th>SFT / GRPO (ARCA)</th><th>Weight-space</th></tr>
-        <tr><td>Cambia</td><td>LoRA o todo</td><td>Unas columnas</td></tr>
-        <tr><td>Cómo</td><td>Gradientes</td><td>Un agente razona y edita</td></tr>
-        <tr><td>Señal</td><td>Datos, recompensa</td><td>Diagnóstico con pocas pasadas</td></tr>
+        <tr><th></th><th>Base</th><th>Editado</th></tr>
+        <tr><td>MATH-500</td><td>7,9 %</td><td>48,1 %</td></tr>
+        <tr><td>GSM8K</td><td>13,8 %</td><td>67,1 %</td></tr>
+        <tr><td>IFEval</td><td>21,0 %</td><td>62,3 %</td></tr>
+        <tr><td>Respuestas al límite de tokens</td><td>93,0 %</td><td>33,1 %</td></tr>
       </table>
-<pre>W[:, cols] -= u (uᵀ W[:, cols])</pre>
-      <p class="small">En el repo: <code>harness-wsp diff</code> lee la edición publicada;
-        <code>probe</code> mide bucles; <code>edit</code> aplica una edición con la misma forma,
-        también a vuestro Qwen3-0.6B + LoRA de ARCA.</p>
     </div>
   </div>
-  <p class="ref">Takehi, Teoh, Zhang, Khattab (MIT CSAIL, nov. 2026):
-    <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a>
-    · Código: <a class="code" href="../src/harness_lab/wsp/">wsp/</a></p>
+  <p class="ref">Takehi, Teoh, Zhang, Khattab (MIT CSAIL, 2 nov. 2026):
+    <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a></p>
 </section>
 
-<!-- 10 -->
+<!-- 9b -->
 <section class="slide">
-  <h2>En la práctica</h2>
-<pre>source scripts/dgx_env.sh
-uv sync
-# abrir tutorial.ipynb con el kernel .venv/bin/python</pre>
-  <h3>Ejercicios</h3>
-  <ol>
-    <li>Añadir una tool al servidor MCP para vuestro tema de ARCA y usarla desde DeepSeek Harness.</li>
-    <li>Comparar en <code>outputs/traffic/</code> lo que envían los tres harnesses.</li>
-    <li>Repetir la tarea del Word con thinking activado: calidad frente a tiempo.</li>
-    <li>Medir los bucles de vuestro modelo de ARCA y probar una edición de pesos.</li>
-  </ol>
-  <h3>Referencias</h3>
-  <p class="small">
-    <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> ·
-    <a href="https://github.com/openai/codex">Codex CLI</a> ·
-    <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a> ·
-    <a href="https://huggingface.co/Qwen/Qwen3.5-4B">Qwen3.5-4B</a> ·
-    <a href="https://modelcontextprotocol.io">MCP</a> ·
-    <a href="https://rikiyat.github.io/blog/weight-space-programming/">Weight-space programming</a> ·
-    <a href="https://github.com/kendrickcetina/dgm-arca">ARCA</a>
-  </p>
+  <h2>La edición, y lo que no puede hacer</h2>
+  <div class="cols">
+    <div>
+      <h3>Qué se cambia</h3>
+      <p class="small">En cada capa, la MLP termina en <code>down_proj</code>: una matriz <code>W</code>
+        (hidden × intermediate). La columna <code>j</code> es lo que la neurona <code>j</code> escribe
+        en el flujo residual, la "memoria de trabajo" que leen las capas siguientes.</p>
+<pre>W[:, cols] -= u (uᵀ W[:, cols])</pre>
+      <p class="small">Tras la edición, esas neuronas ya no pueden escribir nada en la dirección
+        <code>u</code>. Es un cambio de rango 1, pequeño, reversible y fácil de leer
+        (<code>harness-wsp diff</code> lo muestra en los pesos publicados).</p>
+      <h3>Cómo se encuentra <code>u</code></h3>
+      <p class="small">Con una receta simple (<a class="code" href="../src/harness_lab/wsp/edit.py">wsp/edit.py</a>):
+        lo que escribe la MLP, de media, en las respuestas malas <b>menos</b> lo que escribe en las
+        buenas. Las columnas editadas son las que más escriben en esa dirección.</p>
+    </div>
+    <div>
+      <h3>Límites (según los autores)</h3>
+      <ul class="small">
+        <li><b>Quita obstáculos, no añade capacidades.</b> En Gemma 3 270M no consiguieron mejorar
+          MATH-500 (6,8 % → 7,7 %, sin significación).</li>
+        <li><b>Hace falta medir lo suficiente.</b> Con 10 o 25 pasadas de diagnóstico los bucles
+          apenas bajaban; hicieron falta 50.</li>
+        <li><b>No es perfecto.</b> Un tercio de las respuestas siguió llegando al límite.</li>
+      </ul>
+      <table class="small">
+        <tr><th></th><th>SFT / GRPO</th><th>Weight-space</th></tr>
+        <tr><td>Qué cambia</td><td>Todo el modelo o un LoRA</td><td>Unas pocas columnas</td></tr>
+        <tr><td>Cómo</td><td>Gradientes sobre una pérdida</td><td>Diagnóstico y una operación explícita</td></tr>
+        <tr><td>Necesita</td><td>Datos y horas de GPU</td><td>Un fallo medible y unos minutos</td></tr>
+        <tr><td>Se puede leer</td><td>Difícil</td><td>Sí: una dirección, unas capas</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 9c -->
+<section class="slide">
+  <h2>Cómo usarlo para mejorar vuestro modelo de ARCA</h2>
+  <p>Encaja en la <b>fase 1, "Para ir más allá"</b>. Ya tenéis lo que hace falta: el modelo
+    (Qwen3-0.6B + vuestro LoRA), un <b>verificador</b> que dice qué respuestas fallan y
+    <b>pass@1</b> para medir.</p>
+  <table class="small">
+    <tr><th>Idea</th><th>La pregunta</th><th>Cómo</th></tr>
+    <tr><td><b>1. Quitar un fallo sistemático</b></td>
+      <td>¿Vuestro modelo se queda en bucle o se corta antes de responder? Es el caso del post.</td>
+      <td><code>harness-wsp edit --split loops</code>: la dirección separa las respuestas que se
+        cortan de las que terminan.</td></tr>
+    <tr><td><b>2. Subir pass@1</b></td>
+      <td>¿Hay una dirección que distinga los aciertos de los fallos?</td>
+      <td><code>harness-wsp edit --split errors</code>: aciertos frente a fallos según el verificador.
+        Más arriesgado: un fallo de conocimiento no se arregla quitando una dirección.</td></tr>
+    <tr><td><b>3. Dónde mirar</b></td>
+      <td>¿Qué tensores ha cambiado vuestro GRPO, y con qué rango? Es un buen sitio para buscar.</td>
+      <td><code>harness-wsp merge</code> fusiona el LoRA con el base; <code>harness-wsp diff</code> compara
+        los dos modelos tensor a tensor.</td></tr>
+    <tr><td><b>4. Editar frente a entrenar</b></td>
+      <td>¿Cuánto consigue una edición del 0,02 % de los pesos frente a SFT o GRPO?</td>
+      <td>Una tabla de pass@1: base · SFT · GRPO · GRPO + edición, con el coste de cada fila.</td></tr>
+  </table>
+  <p class="small muted">Lo que se valora es el análisis, no que la edición funcione: una edición que
+    no mejora, bien medida y explicada, también es un resultado (a los autores les pasó con Gemma).</p>
+</section>
+
+<!-- 9d -->
+<section class="slide">
+  <h2>Cómo hacerlo, paso a paso</h2>
+  <div class="cols">
+    <div>
+<pre class="small"># 1. Medir: aciertos, respuestas cortadas, bucles
+uv run harness-wsp probe \
+  --model Qwen/Qwen3-0.6B \
+  --adapter ../dgm-arca/rlm/weights/final_rlm_lora \
+  --n 64
+
+# 2. Editar: dirección en la capa 14, quitada
+#    de 64 columnas de las capas 14 y 20
+uv run harness-wsp edit \
+  --model Qwen/Qwen3-0.6B \
+  --adapter ../dgm-arca/rlm/weights/final_rlm_lora \
+  --split loops --layers 14 20 --columns 64
+# -> outputs/wsp/edited/ (modelo + wsp_edit.json)
+
+# 3. Evaluar en vuestro test (desde dgm-arca)
+uv run python -m rlm.evaluate \
+  --data rlm/data/test.jsonl \
+  --model ../harnesses/outputs/wsp/edited \
+  --adapters editado=none</pre>
+    </div>
+    <div>
+      <h3>Reglas del juego</h3>
+      <ul class="small">
+        <li>La dirección se busca con <b>train</b>; el test solo sirve para medir.</li>
+        <li>Probad <b>varias capas</b> (Qwen3-0.6B tiene 28) y varios números de columnas. Una
+          tabla capas × pass@1 ya es un resultado.</li>
+        <li>Medid también <b>lo que empeora</b>: GSM8K como grupo de control.</li>
+        <li><code>probe</code> usa problemas de GSM8K con respuesta numérica. Para vuestro dominio,
+          adaptad <code>load_practice</code> y <code>extract_number</code> en
+          <a class="code" href="../src/harness_lab/wsp/probe.py">wsp/probe.py</a> a vuestro
+          <code>train.jsonl</code> y vuestro verificador.</li>
+      </ul>
+      <h3>En <code>EXPERIMENTS.md</code></h3>
+      <p class="small">Fallo medido → hipótesis → dirección y capas → pesos tocados →
+        pass@1 antes/después → qué empeoró → por qué creéis que funciona (o no).</p>
+    </div>
+  </div>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/wsp/">src/harness_lab/wsp/</a>
+    (<code>probe</code>, <code>edit</code>, <code>merge</code>, <code>diff</code>) ·
+    ARCA: <a href="https://github.com/kendrickcetina/dgm-arca">github.com/kendrickcetina/dgm-arca</a></p>
 </section>
 
 <div id="nav">← → para navegar</div>

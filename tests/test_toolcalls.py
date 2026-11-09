@@ -66,3 +66,37 @@ def test_unterminated_call_at_end_of_generation():
 def test_plain_text_with_angle_brackets():
     out = parse_output("Use a < b and <tag> freely.")
     assert out.text == "Use a < b and <tag> freely." and not out.tool_calls
+
+
+CALL = "<tool_call>\n<function=write_file>\n<parameter=path>\na.md\n</parameter>\n</function>\n</tool_call>"
+
+
+def test_text_after_a_tool_call_ends_the_turn():
+    """A small model may keep writing after its call (e.g. a made-up tool response)."""
+    parser = StreamParser(thinking=False, tools=TOOLS)
+    events = parser.feed(CALL)
+    assert not parser.finished  # another parallel call could still follow
+    events += parser.feed("\n<tool_response>\nSaved a.md\n</tool_response>\nDone!")
+    assert parser.finished
+    events += parser.feed(" more and more text") + parser.finish()
+    assert [e.kind for e in events] == ["tool_call"]
+
+
+def test_parallel_tool_calls_are_not_cut():
+    parser = StreamParser(thinking=False, tools=TOOLS)
+    events = []
+    for ch in CALL + "\n" + CALL:  # char by char: "<tool_c" arrives in pieces
+        events += parser.feed(ch)
+        assert not parser.finished
+    events += parser.finish()
+    assert [e.kind for e in events] == ["tool_call", "tool_call"]
+
+
+def test_long_text_after_a_tool_call_ends_the_turn():
+    parser = StreamParser(thinking=False, tools=TOOLS)
+    events = parser.feed(CALL) + parser.feed("\nLet me explain what I did. ")
+    assert not parser.finished  # short text: a second call may still come
+    for _ in range(20):
+        events += parser.feed("And then some more words. ")
+    assert parser.finished
+    assert [e.kind for e in events + parser.finish()] == ["tool_call"]

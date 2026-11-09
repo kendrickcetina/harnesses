@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from harness_lab.server.engine import Engine, GenerationRequest
-from harness_lab.server.toolcalls import StreamParser, new_call_id
+from harness_lab.server.toolcalls import StreamParser, new_call_id, stream_events
 
 
 def _text(content: Any) -> str:
@@ -78,7 +78,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
     rid, created, model = f"chatcmpl-{new_call_id('')[1:]}", int(time.time()), body.get("model", engine.model_id)
 
     if not body.get("stream"):
-        events = [e for d in gen for e in parser.feed(d)] + parser.finish()
+        events = list(stream_events(gen, parser))
         calls = [e.call for e in events if e.kind == "tool_call"]
         message: dict[str, Any] = {
             "role": "assistant",
@@ -130,9 +130,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
                     )
                     n_calls += 1
 
-        for delta in gen:
-            yield from emit(parser.feed(delta))
-        yield from emit(parser.finish())
+        yield from emit(stream_events(gen, parser))
         yield chunk({}, "tool_calls" if n_calls else gen.finish_reason)
         if (body.get("stream_options") or {}).get("include_usage"):
             usage = {"id": rid, "object": "chat.completion.chunk", "created": created, "model": model}

@@ -42,11 +42,22 @@ class TrafficLog:
         if directory:
             directory.mkdir(parents=True, exist_ok=True)
 
-    def save(self, api: str, body: dict, output: Any) -> None:
-        self.counter += 1
+    @staticmethod
+    def _sizes(body: dict) -> str:
         n_tools = len(body.get("tools") or [])
         n_msgs = len(body.get("messages") or body.get("input") or [])
-        print(f"[{time.strftime('%H:%M:%S')}] {api:<17} messages={n_msgs:<3} tools={n_tools:<3}")
+        return f"messages={n_msgs:<3} tools={n_tools:<3}"
+
+    def start(self, api: str, body: dict) -> float:
+        """One line when a request arrives, so a long generation is visible while it runs."""
+        max_tokens = body.get("max_tokens") or body.get("max_output_tokens") or body.get("max_completion_tokens")
+        print(f"[{time.strftime('%H:%M:%S')}] -> {api:<17} {self._sizes(body)} max_tokens={max_tokens}")
+        return time.time()
+
+    def save(self, api: str, body: dict, output: Any, started: float, note: str = "") -> None:
+        self.counter += 1
+        elapsed = time.time() - started
+        print(f"[{time.strftime('%H:%M:%S')}] <- {api:<17} {self._sizes(body)} {elapsed:.0f}s {note}".rstrip())
         if not self.directory:
             return
         path = self.directory / f"{time.strftime('%Y%m%d-%H%M%S')}-{self.counter:04d}-{api}.json"
@@ -58,17 +69,21 @@ def create_app(engine: Engine, default_thinking: bool = False, traffic_dir: Path
     log = TrafficLog(traffic_dir)
 
     def run(api: str, module, body: dict):
+        started = log.start(api, body)
         result = module.respond(engine, body, default_thinking)
         if isinstance(result, dict):
-            log.save(api, body, result)
+            log.save(api, body, result, started)
             return JSONResponse(result)
 
         def logged() -> Iterator[str]:
-            chunks = []
-            for chunk in result:
-                chunks.append(chunk)
-                yield chunk
-            log.save(api, body, "".join(chunks))
+            chunks, done = [], False
+            try:
+                for chunk in result:
+                    chunks.append(chunk)
+                    yield chunk
+                done = True
+            finally:
+                log.save(api, body, "".join(chunks), started, "" if done else "(client disconnected)")
 
         return StreamingResponse(logged(), media_type="text/event-stream")
 

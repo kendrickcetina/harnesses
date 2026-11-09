@@ -57,3 +57,40 @@ def show(path: Path | None = None, api: str | None = None, system_preview: int =
     print("tools:", ", ".join(s["tools"]))
     print(f"system prompt ({s['system_chars']} chars):\n{s['system'][:system_preview]}")
     return s
+
+
+def tool_calls(path: Path | None = None, api: str | None = None) -> list[tuple[str, str]]:
+    """(tool, arguments) the model asked for, in order, from the history of a saved request
+    (the latest one by default). For Codex, the commands it ran with ``exec_command``."""
+    path = path or files(api)[-1]
+    data = json.loads(path.read_text())
+    req, calls = data["request"], []
+    if data["api"] == "responses":
+        for item in req.get("input") or []:
+            if item.get("type") == "function_call":
+                calls.append((item.get("name", ""), item.get("arguments", "")))
+            elif item.get("type") == "custom_tool_call":
+                calls.append((item.get("name", ""), item.get("input", "")))
+    elif data["api"] == "messages":
+        for m in req.get("messages") or []:
+            for b in m.get("content") if isinstance(m.get("content"), list) else []:
+                if b.get("type") == "tool_use":
+                    calls.append((b.get("name", ""), json.dumps(b.get("input") or {}, ensure_ascii=False)))
+    else:
+        for m in req.get("messages") or []:
+            for c in m.get("tool_calls") or []:
+                calls.append((c["function"]["name"], c["function"].get("arguments", "")))
+    return calls
+
+
+def show_tool_calls(path: Path | None = None, api: str | None = None, width: int = 400) -> None:
+    """Print each tool call; shell commands (``cmd``/``command``) are shown as ``$ command``."""
+    for name, args in tool_calls(path, api):
+        try:
+            parsed = json.loads(args) if isinstance(args, str) else args
+        except json.JSONDecodeError:
+            parsed = None
+        command = parsed.get("cmd") or parsed.get("command") if isinstance(parsed, dict) else None
+        if isinstance(command, list):
+            command = " ".join(command)
+        print(f"$ {command[:width]}" if command else f"{name}({str(args)[:width]})")

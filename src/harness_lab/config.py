@@ -19,7 +19,8 @@ WSP_BASE_MODEL_ID = "Qwen/Qwen3.5-0.8B"
 WSP_EDITED_MODEL_ID = "RikiyaT/Qwen3.5-0.8B-weight-space-programming"
 
 HOST = os.environ.get("HARNESS_HOST", "127.0.0.1")
-PORT = int(os.environ.get("HARNESS_PORT", "8000"))
+# Not 8000: on the DGX a shared vLLM already listens there.
+PORT = int(os.environ.get("HARNESS_PORT", "8765"))
 BASE_URL = os.environ.get("HARNESS_BASE_URL", f"http://{HOST}:{PORT}/v1")
 
 # The local server does not check keys, but every client wants one.
@@ -29,6 +30,7 @@ API_KEY = os.environ.get("HARNESS_API_KEY", "sk-local")
 WORKSPACE_DIR = Path(os.environ.get("HARNESS_WORKSPACE", REPO_ROOT / "workspace"))
 DSH_HOME = Path(os.environ.get("HARNESS_DSH_HOME", REPO_ROOT / ".dsh_home"))
 OUTPUTS_DIR = Path(os.environ.get("HARNESS_OUTPUTS", REPO_ROOT / "outputs"))
+HARNESS_CODEX_SANDBOX = "off"
 
 # HARNESS_SCRIPTED=1 runs everything with a scripted fake model: no GPU, no downloads.
 # Useful to rehearse the tutorial offline; the answers are fixed.

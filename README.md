@@ -9,39 +9,70 @@ En este repositorio usamos un modelo local, **Qwen3.5-4B**, como cerebro de tres
 - **DeepSeek Harness** (`dsh`): el foco del tutorial. Abierto (MIT), "todo es un plugin".
 - **Codex CLI** (OpenAI) y **Claude Code** (Anthropic): opcionales, mismo modelo y mismas tools.
 
-Le añadimos una herramienta propia por MCP que genera **documentos Word** y terminamos con
-**weight-space programming**: leer y editar los pesos de Qwen sin gradientes.
+Le añadimos una herramienta propia por MCP que genera **documentos Word**, y Codex analiza un
+Excel ejecutando Python y escribe un informe.
+
+**Aparte**, sin relación con los harnesses: **weight-space programming**, mejorar un modelo
+editando sus pesos sin gradientes. Está en las slides y en `harness-wsp`, para probarlo con
+los modelos de ARCA.
 
 - Tutorial: [`tutorial.ipynb`](tutorial.ipynb) (en español)
 - Presentación: [`slides/index.html`](slides/index.html) (ábrela en el navegador)
 
 ## Empezar
 
-En la DGX (terminal de code-server, dentro de `~/clusters/dgx`):
+Necesitas [uv](https://docs.astral.sh/uv/) y, para el modelo real, una GPU NVIDIA con ≥16 GB.
 
 ```bash
 git clone https://github.com/kendrickcetina/harnesses.git
 cd harnesses
-source scripts/dgx_env.sh      # cada sesión: cachés de uv y Hugging Face en clusters/dgx
 uv sync                        # todo: torch, transformers, DeepSeek Harness, MCP, python-docx, Jupyter
 ```
 
-Abre `tutorial.ipynb` con el kernel `.venv/bin/python`. El notebook descarga el modelo,
-arranca el servidor y recorre todo.
+Abre `tutorial.ipynb` con el kernel `.venv/bin/python`. El notebook descarga el modelo
+(~11 GB en total con los de la sección 6), arranca el servidor y recorre todo.
 
 En un portátil sin GPU puedes ensayar con un modelo simulado (respuestas fijas):
 `HARNESS_SCRIPTED=1 uv run jupyter lab`.
+
+**Si tu `$HOME` se borra entre sesiones** (por ejemplo, en la DGX solo persiste
+`~/clusters/dgx`), guarda las cachés en una carpeta que sí persista antes de `uv sync`;
+si no, cada sesión vuelve a descargar los modelos y Python:
+
+```bash
+export HF_HOME=~/clusters/dgx/.hf_cache                   # modelos de Hugging Face
+export UV_CACHE_DIR=~/clusters/dgx/.uv/cache              # paquetes de uv
+export UV_PYTHON_INSTALL_DIR=~/clusters/dgx/.uv/python    # el Python al que apunta .venv
+```
 
 ## Comandos
 
 ```bash
 uv run harness-download                 # Qwen3.5-4B (9,3 GB) al caché de Hugging Face
-uv run harness-serve                    # servidor local en http://127.0.0.1:8000/v1
+uv run harness-serve                    # servidor local en http://127.0.0.1:8765/v1
 uv run harness-dsh "Crea un Word que explique qué es un harness"
 uv run harness-wsp diff                 # qué cambió la edición de weight-space programming
+uv run harness-wsp edit --model Qwen/Qwen3-0.6B --adapter <LoRA de ARCA> --split errors
+uv run harness-wsp merge --model Qwen/Qwen3-0.6B --adapter <LoRA de ARCA>   # para diff
 uv run pytest                           # tests offline: sin GPU ni descargas
 bash scripts/install_clis.sh            # opcional: Codex y Claude Code sin root
 ```
+
+## Tests
+
+```bash
+uv run pytest                                               # offline (~1 min): modelo simulado
+HARNESS_TEST_GPU=1 uv run pytest tests/test_notebook.py -k gpu -s   # notebook real en GPU
+```
+
+- **Offline**: los tres protocolos del servidor, el parser de tool calls, las tools de Word,
+  DeepSeek Harness de verdad contra un modelo simulado, las utilidades de weight-space
+  programming y el notebook entero con `HARNESS_SCRIPTED=1`.
+- **GPU** (`-k gpu`, ~6 min): ejecuta `tutorial.ipynb` de principio a fin con Qwen3.5-4B y
+  comprueba cada sección (tool calls reales, `.docx` creados por el harness mínimo y por
+  DeepSeek Harness vía MCP, informe `rank=1` de la edición publicada y la sonda de bucles).
+  El notebook ejecutado queda en el directorio temporal de pytest (`tutorial.executed.ipynb`).
+- Codex y Claude Code: `HARNESS_TEST_CLIS=1 uv run pytest` si están instalados.
 
 ## Cómo está organizado
 
@@ -54,7 +85,7 @@ bash scripts/install_clis.sh            # opcional: Codex y Claude Code sin root
 | `src/harness_lab/tools/` | Tools propias: Word con python-docx, servidor MCP |
 | `src/harness_lab/wsp/` | Weight-space programming: leer, medir y editar pesos |
 | `src/harness_lab/traffic.py` | Ver qué envía cada harness al modelo |
-| `tests/` | Tests offline con un modelo simulado (incluye ejecutar el notebook entero) |
+| `tests/` | Tests offline con un modelo simulado y el notebook entero (simulado o en GPU) |
 
 El servidor ofrece las tres APIs porque cada harness habla una:
 
@@ -67,12 +98,20 @@ El servidor ofrece las tres APIs porque cada harness habla una:
 Cada petición se guarda en `outputs/traffic/`: ahí se ve el system prompt y las tools que
 mete cada harness antes de vuestra pregunta.
 
+**No se usa ningún servicio externo de modelos.** "OpenAI" y "Anthropic" son aquí solo
+*formatos de API*: todas las peticiones van al servidor local y las responde Qwen. El
+paquete `openai` (en `mini_harness.py` y el notebook) es una librería cliente HTTP apuntada a
+`http://127.0.0.1:8765/v1`, y `openai/gsm8k` es un dataset de Hugging Face.
+
 ## Notas
 
 - **GPU.** Qwen3.5-4B en bf16 cabe en la partición de 16 GB de la DGX. Con poca memoria:
   `uv run harness-serve --model Qwen/Qwen3.5-2B` o `--max-context 16384`.
-- **Velocidad.** El servidor usa `transformers` (una petición a la vez). Para ir más rápido en
-  Linux: `uv sync --extra fast` (kernels de flash-linear-attention para Qwen3.5).
+- **Velocidad.** El servidor usa `transformers` (una petición a la vez): ~35 tokens/s con
+  Qwen3.5-4B en una partición MIG de H200. El notebook completo tarda ~6 min. El servidor
+  desactiva el backend cuDNN de atención, que en GPUs Hopper recompila un grafo por cada
+  longitud nueva y deja la generación en ~2,6 tokens/s (`engine.py`, `pick_device`).
+  `uv sync --extra fast` (flash-linear-attention) apenas mejora la generación (~5 %).
 - **Thinking.** Por defecto el servidor sigue lo que pide el cliente. Claude Code siempre lo
   pide; con `uv run harness-serve --thinking off` se fuerza a no pensar (más rápido).
 - **Privacidad.** `dsh.py` desactiva las filas de DeepSeek Harness que suben logs de sesión.

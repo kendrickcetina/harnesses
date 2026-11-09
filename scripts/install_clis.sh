@@ -24,6 +24,16 @@ install_codex() {
     tar -xzf "$tmp/codex.tgz" -C "$tmp"
     mv "$tmp/codex-${target}" "$BIN/codex"
     chmod +x "$BIN/codex"
+    # Codex's Linux sandbox needs bubblewrap; the release ships a static one, looked up next to codex.
+    case "$target" in
+        *linux*)
+            curl -fsSL "https://github.com/openai/codex/releases/latest/download/bwrap-${target}.tar.gz" -o "$tmp/bwrap.tgz"
+            tar -xzf "$tmp/bwrap.tgz" -C "$tmp"
+            mkdir -p "$BIN/codex-resources"
+            mv "$tmp/bwrap-${target}" "$BIN/codex-resources/bwrap"
+            chmod +x "$BIN/codex-resources/bwrap"
+            ;;
+    esac
     rm -rf "$tmp"
     echo "codex installed in $BIN: $("$BIN/codex" --version)"
 }
@@ -44,4 +54,4 @@ case "$WHAT" in
     all) install_codex; install_claude ;;
     *) echo "usage: $0 [codex|claude|all]"; exit 1 ;;
 esac
-echo "Make sure $BIN is on your PATH (scripts/dgx_env.sh does it on the DGX)."
+echo "Make sure $BIN is on your PATH."

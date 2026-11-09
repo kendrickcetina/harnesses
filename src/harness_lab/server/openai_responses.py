@@ -13,7 +13,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from harness_lab.server.engine import Engine, GenerationRequest
-from harness_lab.server.toolcalls import StreamParser, new_call_id
+from harness_lab.server.toolcalls import StreamParser, new_call_id, stream_events
 
 
 def _text(content: Any) -> str:
@@ -168,7 +168,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
         }
 
     if not body.get("stream"):
-        events = [e for d in gen for e in parser.feed(d)] + parser.finish()
+        events = list(stream_events(gen, parser))
         output = []
         text = "".join(e.text for e in events if e.kind == "text").strip()
         if text:
@@ -237,9 +237,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
                     yield sse("response.output_item.done", {"output_index": len(output), "item": item})
                     output.append(item)
 
-        for d in gen:
-            yield from emit(parser.feed(d))
-        yield from emit(parser.finish())
+        yield from emit(stream_events(gen, parser))
         yield from close_message()
         yield sse("response.completed", {"response": envelope("completed", output)})
 

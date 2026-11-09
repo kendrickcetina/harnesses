@@ -17,6 +17,7 @@ class ProbeResult:
     loop_rate: float  # repeats itself (see looks_looping)
     outputs: list[str] = field(default_factory=list)
     truncated: list[bool] = field(default_factory=list)
+    correct: list[bool] = field(default_factory=list)  # verdict per answer
 
     def summary(self) -> str:
         return (
@@ -56,7 +57,10 @@ def run_probe(
 ) -> ProbeResult:
     import torch
 
+    from harness_lab.server.engine import stop_token_ids
+
     device = next(model.parameters()).device
+    stop_ids = stop_token_ids(tokenizer, model)
     tokenizer.padding_side = "left"
     outputs, truncated = [], []
     for start in range(0, len(problems), batch_size):
@@ -80,6 +84,7 @@ def run_probe(
                 top_p=0.95,
                 top_k=20,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+                eos_token_id=stop_ids,
             )
         for row in out[:, enc["input_ids"].shape[1] :]:
             n_tokens = int((row != (tokenizer.pad_token_id or tokenizer.eos_token_id)).sum())
@@ -94,4 +99,5 @@ def run_probe(
         loop_rate=sum(looks_looping(o) for o in outputs) / n,
         outputs=outputs,
         truncated=truncated,
+        correct=correct,
     )

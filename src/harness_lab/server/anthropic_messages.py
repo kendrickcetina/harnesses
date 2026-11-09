@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from harness_lab.server.engine import Engine, GenerationRequest
-from harness_lab.server.toolcalls import StreamParser, new_call_id
+from harness_lab.server.toolcalls import StreamParser, new_call_id, stream_events
 
 
 def _blocks(content: Any) -> list[dict]:
@@ -126,7 +126,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
         return "max_tokens" if gen.finish_reason == "length" else "end_turn"
 
     if not body.get("stream"):
-        events = [e for d in gen for e in parser.feed(d)] + parser.finish()
+        events = list(stream_events(gen, parser))
         content: list[dict] = []
         reasoning = "".join(e.text for e in events if e.kind == "reasoning").strip()
         if reasoning:
@@ -212,9 +212,7 @@ def respond(engine: Engine, body: dict[str, Any], default_thinking: bool) -> dic
                 )
                 yield sse("content_block_delta", {"index": index, "delta": delta})
 
-        for d in gen:
-            yield from emit(parser.feed(d))
-        yield from emit(parser.finish())
+        yield from emit(stream_events(gen, parser))
         yield from close()
         if index == -1:  # never return an empty message
             yield sse("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}})

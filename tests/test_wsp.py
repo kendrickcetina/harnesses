@@ -61,3 +61,20 @@ def test_probe_helpers():
     assert extract_number("Total: 42.") == "42"
     assert looks_looping("wait let me check again " * 50)
     assert not looks_looping("A short and perfectly normal answer with no repetition at all here today.")
+
+
+def test_split_answers_loops_or_errors():
+    from harness_lab.wsp.cli import split_answers
+    from harness_lab.wsp.probe import ProbeResult
+
+    loop = "wait let me check again " * 50
+    result = ProbeResult(
+        accuracy=0.5,
+        truncated_rate=0.25,
+        loop_rate=0.25,
+        outputs=["right", "wrong", "cut", loop],
+        truncated=[False, False, True, False],
+        correct=[True, False, True, False],
+    )
+    assert split_answers(result, "loops") == (["cut", loop], ["right", "wrong"])
+    assert split_answers(result, "errors") == (["wrong", loop], ["right", "cut"])

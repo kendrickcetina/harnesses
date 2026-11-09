@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +29,8 @@ THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
 CALL_OPEN = "<tool_call>"
 CALL_CLOSE = "</tool_call>"
+TOOL_RESPONSE_OPEN = "<tool_response>"  # how the template shows tool results to the model
+MAX_TEXT_BETWEEN_CALLS = 256  # characters after a call, without a new one, that end the turn
 
 _FUNCTION_RE = re.compile(r"<function=([^>\n]+)>(.*?)(?:</function>|$)", re.DOTALL)
 _PARAM_RE = re.compile(r"<parameter=([^>\n]+)>\n?(.*?)(?:\n?</parameter>|(?=<parameter=)|$)", re.DOTALL)
@@ -174,6 +177,24 @@ class StreamParser:
                     events.append(Event("text", self.buffer[:idx].rstrip()))
                 self.buffer = self.buffer[idx + len(CALL_OPEN) :]
                 self.state = "tool"
+            elif self.state == "after_call":
+                # Only another (parallel) <tool_call> should follow a call: the template says
+                # "NO suffix", so text in between is ignored.
+                idx = self.buffer.find(CALL_OPEN)
+                if idx != -1:
+                    self.buffer = self.buffer[idx + len(CALL_OPEN) :]
+                    self.state = "tool"
+                    continue
+                # A made-up tool result, or a lot of text without a new call, ends the turn.
+                # Without this a small model can ramble until max_tokens (32k for Claude Code,
+                # ~15 min) while the client receives nothing and times out.
+                if TOOL_RESPONSE_OPEN in self.buffer or len(self.buffer.strip()) > MAX_TEXT_BETWEEN_CALLS:
+                    self.buffer = ""
+                    self.state = "done"
+                return events
+            elif self.state == "done":
+                self.buffer = ""
+                return events
             else:  # inside <tool_call>
                 idx = self.buffer.find(CALL_CLOSE)
                 if idx == -1:
@@ -181,13 +202,13 @@ class StreamParser:
                 call = parse_tool_block(self.buffer[:idx], self.tools)
                 if call:
                     events.append(Event("tool_call", call=call))
-                rest = self.buffer[idx + len(CALL_CLOSE) :]
-                nxt = rest.find(CALL_OPEN)
-                # Anything after the last call is ignored (the template says "NO suffix").
-                self.buffer = rest[nxt + len(CALL_OPEN) :] if nxt != -1 else ""
-                if nxt == -1:
-                    self.state = "done"
-                    return events
+                self.buffer = self.buffer[idx + len(CALL_CLOSE) :]
+                self.state = "after_call"
+
+    @property
+    def finished(self) -> bool:
+        """True once the turn is over: the rest of the generation can be cancelled."""
+        return self.state == "done"
 
     def finish(self) -> list[Event]:
         events: list[Event] = []
@@ -201,6 +222,25 @@ class StreamParser:
             if call:
                 events.append(Event("tool_call", call=call))
         return events
+
+
+def stream_events(generation: Iterable[str], parser: StreamParser) -> Iterator[Event]:
+    """Feed a generation's text deltas to ``parser`` and yield the events.
+
+    Stops the generation as soon as the parser says the turn is over, instead of letting
+    the model write (invisible) text until max_tokens.
+    """
+    deltas = iter(generation)
+    try:
+        for delta in deltas:
+            yield from parser.feed(delta)
+            if parser.finished:
+                break
+        yield from parser.finish()
+    finally:
+        close = getattr(deltas, "close", None)
+        if close:
+            close()  # a generator: runs its cleanup, which cancels model.generate()
 
 
 def parse_output(text: str, thinking: bool = False, tools: list[dict] | None = None) -> ParsedOutput:

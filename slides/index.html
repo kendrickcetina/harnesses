@@ -550,55 +550,63 @@ Modelo:    50 × 14 = 700          →   &lt;answer&gt;700 mg&lt;/answer&gt;    
 <!-- 9f -->
 <section class="slide">
   <h2>Cómo hacerlo, paso a paso</h2>
-  <div class="cols" style="grid-template-columns: 1fr 1.25fr; gap: 2.5em;">
+  <p class="small">Hay <b>dos modelos</b>, con papeles distintos. El <b>modelo editado</b> es el
+    vuestro: Qwen3-0.6B con vuestro LoRA. El <b>editor</b> decide qué pesos cambiar. En el post el
+    editor es otro LLM (GPT-6 Astra); en la ruta B el editor sois vosotros, con una receta fija.</p>
+  <div class="cols" style="gap: 2em;">
     <div>
-      <h3>Cómo lo hicieron los autores</h3>
-      <ol class="small">
-        <li>Un LLM (Astra) con una sesión de Python sobre los pesos, sin gradientes.</li>
-        <li>Un presupuesto de 10, 25 o 50 pasadas hacia delante sobre problemas de práctica (train
-          de GSM8K y MATH).</li>
-        <li>Lee las respuestas, ve los bucles y formula una hipótesis.</li>
-        <li>Busca la causa en los pesos y en las activaciones: una dirección que escriben las MLP de
-          las capas 15 y 19.</li>
-        <li>Resta esa dirección de 64 columnas de cada <code>down_proj</code>.</li>
-        <li>Se evalúa en benchmarks que Astra nunca vio.</li>
-      </ol>
-      <h3>Reglas del juego</h3>
-      <ul class="small">
-        <li>Buscad la dirección en <b>train</b>; el test solo sirve para medir.</li>
-        <li>Probad varias capas (Qwen3-0.6B tiene 28) y varios valores de <code>k</code>.</li>
-        <li>Medid lo que empeora: GSM8K como grupo de control.</li>
-      </ul>
+      <h3>A. Como en el post: un LLM como editor</h3>
+<pre class="small">modelo = Qwen3-0.6B + vuestro LoRA    # el que se edita
+editor = un LLM fuerte que ejecute Python
+         (Claude, GPT...; Qwen-4B se queda corto)
+
+# Lo que el editor puede hacer (sin gradientes)
+pasada(prompts)        # respuestas + activaciones
+                       # presupuesto: 50 pasadas
+leer_pesos(nombre)
+escribir_pesos(nombre, tensor)
+
+tarea = """Mejora el cálculo de dosis por toma
+editando pesos. Tienes train y el verificador."""
+                       # el test NO se lo dais
+
+repetir hasta agotar el presupuesto:
+    el editor lee fallos y formula una hipótesis
+    mira pesos y activaciones para localizarla
+    edita y comprueba en train
+
+guardar modelo editado
+medir en test   # lo hacéis vosotros, no el editor</pre>
     </div>
     <div>
-      <h3>Cómo podríais hacerlo (pseudocódigo)</h3>
-<pre class="small"># 0. Separar, con vuestro verificador, UN tipo de fallo
-fallos   = problemas de train donde da la dosis diaria
-aciertos = problemas de train parecidos que resuelve bien
+      <h3>B. A mano: vosotros como editor</h3>
+<pre class="small">modelo = Qwen3-0.6B + vuestro LoRA
 
-# 1. Leer qué escribe cada MLP en el token donde decide
-#    (justo antes de dividir, o de escribir &lt;answer&gt;)
+# 0. Con el verificador, UN tipo de fallo
+fallos   = train donde da la dosis diaria
+aciertos = train parecidos que resuelve bien
+
+# 1. Lo que escribe cada MLP donde decide
+#    (justo antes de dividir o de &lt;answer&gt;)
 para cada capa:
     a_f = media(salida_MLP(capa, fallos))
     a_a = media(salida_MLP(capa, aciertos))
     u[capa]   = normalizar(a_f - a_a)
-    sep[capa] = cuánto separa u fallos de aciertos
+    sep[capa] = cuánto separa u los dos grupos
 capa = la de mayor sep
 
-# 2. Columnas de W = down_proj(capa) que más escriben en u
-cols = las k columnas con mayor |uᵀ W[:, j]|   (k = 64)
+# 2. Columnas de W = down_proj(capa)
+cols = k columnas con mayor |uᵀ W[:, j]|  # k = 64
 
-# 3. Editar: quitar la dirección de esas columnas
+# 3. Editar
 W[:, cols] -= u (uᵀ W[:, cols])
 
-# 4. Medir en test: pass@1, cuántos fallos de este tipo
-#    quedan, y el grupo de control</pre>
-      <p class="small muted">Una edición que no mejora, bien medida y explicada, también es un
-        resultado. A los autores les pasó con Gemma.</p>
+# 4. Medir en test + grupo de control</pre>
     </div>
   </div>
-  <p class="ref">ARCA: <a href="https://github.com/kendrickcetina/dgm-arca">github.com/kendrickcetina/dgm-arca</a>
-    · Post: <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a></p>
+  <p class="small muted">En las dos rutas: buscad en train y medid en test, con GSM8K como control.
+    Una edición que no mejora, bien medida, también es un resultado.
+    · <a href="https://github.com/kendrickcetina/dgm-arca">ARCA</a></p>
 </section>
 
 <div id="nav">← → para navegar</div>

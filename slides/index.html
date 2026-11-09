@@ -114,6 +114,27 @@
     · Tutorial, sección 3</p>
 </section>
 
+<!-- 3b -->
+<section class="slide">
+  <h2>Harness frente a grafo de agente (LangGraph)</h2>
+  <table>
+    <tr><th></th><th>Grafo de agente (LangGraph)</th><th>Harness (DeepSeek Harness, Codex, Claude Code)</th></tr>
+    <tr><td>Qué es</td><td>Una librería para <em>programar</em> el flujo: nodos, aristas y estado</td><td>Un programa listo para usar: bucle, tools y entorno</td></tr>
+    <tr><td>Quién decide el camino</td><td>Tú, al dibujar el grafo (aristas fijas o condicionales)</td><td>El modelo, en cada vuelta de un bucle genérico</td></tr>
+    <tr><td>Unidad de trabajo</td><td>Nodo: una función o una llamada al LLM</td><td>Paso: llamada al modelo + ejecución de tools</td></tr>
+    <tr><td>Estado</td><td>Un esquema que defines tú, con <em>checkpoints</em></td><td>El historial de la conversación, sesiones, compactación</td></tr>
+    <tr><td>Tools</td><td>Las que declares tú</td><td>Ya trae shell, ficheros, web, skills y MCP</td></tr>
+    <tr><td>Entorno</td><td>Ninguno: sandbox y permisos los pones tú</td><td>Sandbox, permisos, aprobaciones, workspace</td></tr>
+    <tr><td>Predecible</td><td>Alto: rutas explícitas, se testean nodo a nodo</td><td>Menor: el camino lo decide el modelo</td></tr>
+    <tr><td>Úsalo para</td><td>Procesos conocidos con ramas: RAG con verificación, flujos con revisión humana</td><td>Tareas abiertas: código, documentos, análisis</td></tr>
+  </table>
+  <p><b>No se excluyen.</b> El agente ReAct de LangGraph es un grafo de dos nodos (modelo ⇄ tools):
+    el bucle de un harness, sin el entorno. Y un harness puede ser un nodo de un grafo
+    (por ejemplo, un nodo que llama a <code>codex exec</code> o a <code>dsh.run_task</code>).</p>
+  <p class="ref">En ARCA: la fase 3 (RAG) es un flujo fijo, un grafo; la fase 4 (ReAct) es un harness mínimo.
+    · <a href="https://langchain-ai.github.io/langgraph/">LangGraph</a></p>
+</section>
+
 <!-- 4 -->
 <section class="slide">
   <h2>Tres harnesses, un mismo modelo</h2>

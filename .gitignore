@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Secrets
+.env
+
+# Models, runs and generated files
+models/
+outputs/
+workspace/
+.dsh_home/
+hf_cache/
+.cache/
+
+# Tools
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# System
+.DS_Store
+Thumbs.db
+.codex_home/
+.claude_home/

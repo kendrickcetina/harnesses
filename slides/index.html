@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harnesses: del modelo al agente</title>
+<style>
+  :root { --fg: #000; --bg: #fff; --muted: #666; --line: #000; --soft: #eee; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body { font: 20px/1.45 "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .slide { display: none; position: absolute; inset: 0; padding: 6vh 8vw 8vh; overflow: auto; }
+  .slide.active { display: block; }
+  h1 { font-size: 2.6em; line-height: 1.1; margin: 0 0 .4em; letter-spacing: -0.02em; }
+  h2 { font-size: 1.6em; margin: 0 0 .6em; padding-bottom: .25em; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 1em; margin: 1em 0 .3em; text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: .4em 0 .8em; max-width: 52em; }
+  .lead { font-size: 1.25em; max-width: 36em; }
+  .muted { color: var(--muted); }
+  .small { font-size: .78em; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .85em; }
+  pre { border: 1px solid var(--line); padding: .8em 1em; margin: .6em 0; overflow-x: auto; line-height: 1.35; }
+  table { border-collapse: collapse; width: 100%; margin: .4em 0 .8em; font-size: .86em; }
+  th, td { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: .35em .6em; text-align: left; vertical-align: top; }
+  th { border-top: 2px solid var(--line); border-bottom: 2px solid var(--line); }
+  td:first-child, th:first-child { padding-left: 0; }
+  a { color: var(--fg); }
+  a.code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .8em; }
+  ul { margin: .3em 0 .8em; padding-left: 1.2em; }
+  li { margin: .2em 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 3em; }
+  .flow { display: flex; align-items: stretch; gap: .6em; margin: 1em 0; flex-wrap: wrap; }
+  .box { border: 2px solid var(--line); padding: .5em .8em; min-width: 8em; }
+  .box b { display: block; }
+  .box.dash { border-style: dashed; }
+  .arrow { align-self: center; font-size: 1.4em; }
+  .ref { margin-top: 1.2em; font-size: .8em; color: var(--muted); }
+  .ref a { color: var(--muted); }
+  #counter { position: fixed; right: 2vw; bottom: 2vh; font-size: .7em; color: var(--muted); }
+  #nav { position: fixed; left: 2vw; bottom: 2vh; font-size: .7em; color: var(--muted); }
+  @media print {
+    .slide { display: block; position: relative; page-break-after: always; height: 100vh; }
+    #counter, #nav { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 1 -->
+<section class="slide">
+  <p class="muted">Modelos Generativos Profundos · MIA · ICAI · 2026-2027</p>
+  <h1>Harnesses:<br>del modelo al agente</h1>
+  <p class="lead">Un modelo transforma texto en texto. El harness es todo lo demás:
+    el bucle, las herramientas, los permisos y el contexto.</p>
+  <p class="muted">DeepSeek Harness · Codex · Claude Code · Qwen3.5-4B en la DGX</p>
+  <p class="ref">Repositorio: <a href="https://github.com/kendrickcetina/harnesses">github.com/kendrickcetina/harnesses</a>
+    · Tutorial: <a href="../tutorial.ipynb">tutorial.ipynb</a></p>
+</section>
+
+<!-- 2 -->
+<section class="slide">
+  <h2>Llamada al modelo frente a harness</h2>
+  <div class="flow">
+    <div class="box"><b>Llamada</b>mensajes → modelo → texto</div>
+    <div class="arrow">vs</div>
+    <div class="box"><b>Harness</b>tarea → [ modelo → tool → resultado ]ⁿ → respuesta</div>
+  </div>
+  <table>
+    <tr><th></th><th>Llamada al modelo</th><th>Harness</th></tr>
+    <tr><td>Qué es</td><td>Una función: entrada → salida</td><td>Un programa que llama al modelo en bucle</td></tr>
+    <tr><td>Estado</td><td>Ninguno. Cada llamada empieza de cero</td><td>Historial, sesiones, memoria, compactación</td></tr>
+    <tr><td>Tools</td><td>El modelo <em>pide</em> una tool (JSON)</td><td>El harness la <em>ejecuta</em> y devuelve el resultado</td></tr>
+    <tr><td>Acciones</td><td>No toca nada</td><td>Lee y escribe ficheros, ejecuta comandos</td></tr>
+    <tr><td>Control</td><td>Lo decide tu código</td><td>Lo decide el modelo, dentro de límites</td></tr>
+    <tr><td>Seguridad</td><td>—</td><td>Permisos, sandbox, aprobaciones</td></tr>
+    <tr><td>Contexto</td><td>Lo que tú envías</td><td>System prompt, tools, instrucciones del repo, resultados</td></tr>
+  </table>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/mini_harness.py">mini_harness.py</a> (un harness en ~100 líneas)
+    · <a class="code" href="../src/harness_lab/server/toolcalls.py">server/toolcalls.py</a> (cómo un texto se convierte en tool call)</p>
+</section>
+
+<!-- 3 -->
+<section class="slide">
+  <h2>Anatomía de un harness</h2>
+  <div class="cols">
+    <div>
+      <h3>El núcleo</h3>
+      <ul>
+        <li><b>Bucle</b>: llamar, ejecutar tools, repetir hasta terminar</li>
+        <li><b>Registro de tools</b>: nombre, descripción, esquema JSON</li>
+        <li><b>Ejecución</b>: shell, ficheros, web, MCP</li>
+        <li><b>Condición de parada</b>: respuesta final o límite de pasos</li>
+      </ul>
+      <pre>for step in range(max_steps):
+    msg = model(messages, tools)
+    if not msg.tool_calls:
+        return msg.content
+    for call in msg.tool_calls:
+        messages += run(call)</pre>
+    </div>
+    <div>
+      <h3>Lo que añade un harness real</h3>
+      <ul>
+        <li><b>Permisos y sandbox</b>: qué puede tocar</li>
+        <li><b>Contexto</b>: compactación, instrucciones (<code>AGENTS.md</code>, <code>CLAUDE.md</code>)</li>
+        <li><b>Sesiones</b>: guardar y reanudar</li>
+        <li><b>Skills</b>: instrucciones que se cargan bajo demanda</li>
+        <li><b>Subagentes y planes</b>: dividir el trabajo</li>
+        <li><b>MCP</b>: tools externas con un protocolo estándar</li>
+      </ul>
+    </div>
+  </div>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/mini_harness.py">MiniHarness.run</a>
+    · Tutorial, sección 3</p>
+</section>
+
+<!-- 4 -->
+<section class="slide">
+  <h2>Tres harnesses, un mismo modelo</h2>
+  <table>
+    <tr><th></th><th>DeepSeek Harness</th><th>Codex CLI</th><th>Claude Code</th></tr>
+    <tr><td>Autor · licencia</td><td>DeepSeek · MIT</td><td>OpenAI · Apache-2.0</td><td>Anthropic · propietario</td></tr>
+    <tr><td>Lenguaje</td><td>TypeScript (SDK Python)</td><td>Rust</td><td>TypeScript</td></tr>
+    <tr><td>API que habla</td><td>Anthropic Messages</td><td>OpenAI Responses</td><td>Anthropic Messages</td></tr>
+    <tr><td>Idea</td><td>Todo es un plugin</td><td>Agente de código con sandbox</td><td>Agente de código y general</td></tr>
+    <tr><td>Tools nativas*</td><td>3 (mínimo) · 25 (completo)</td><td>~19</td><td>&gt;15 · 4 con <code>--tools</code></td></tr>
+    <tr><td>System prompt*</td><td>0,15k · 2,6k caracteres</td><td>~20,7k caracteres</td><td>~6,9k (con 4 tools)</td></tr>
+    <tr><td>Extensión</td><td>Plugins, skills, MCP</td><td>MCP, skills</td><td>MCP, skills, hooks, plugins</td></tr>
+    <tr><td>Instalación aquí</td><td><code>uv sync</code></td><td><code>scripts/install_clis.sh</code></td><td><code>scripts/install_clis.sh</code></td></tr>
+  </table>
+  <p class="small muted">* Medido con nuestro servidor (<code>outputs/traffic/</code>) en nov. 2026: dsh 0.2.1rc2, codex-cli 0.162, Claude Code 2.1. Cambia con cada versión.</p>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/dsh.py">dsh.py</a>
+    · <a class="code" href="../src/harness_lab/clis.py">clis.py</a>
+    · <a class="code" href="../src/harness_lab/traffic.py">traffic.py</a></p>
+</section>
+
+<!-- 5 -->
+<section class="slide">
+  <h2>DeepSeek Harness</h2>
+  <div class="cols">
+    <div>
+      <p>Publicado en agosto de 2026, en <em>developer preview</em>. Sobre Cordis:
+        modelos, tools, skills, sesiones, sandbox y bucle son plugins que se cambian con un
+        <em>patch</em> YAML.</p>
+      <h3>Perfil <code>sdk-minimal</code></h3>
+      <p><code>bash</code> · <code>read_image</code> · <code>working_directory</code></p>
+      <h3>Perfil <code>sdk</code> (completo)</h3>
+      <p class="small"><code>read</code> <code>write</code> <code>edit</code> <code>glob</code> <code>grep</code> <code>bash</code>
+        <code>job_*</code> <code>skill</code> <code>todo_write</code> <code>exit_plan_mode</code>
+        <code>subagent</code> <code>subagent_fork</code> <code>send_message</code> <code>workflow</code>
+        <code>*_goal</code> <code>web_search</code> <code>web_fetch</code> …</p>
+      <p class="small">Trae skills de Office (<code>office-docx</code>, <code>-xlsx</code>, <code>-pptx</code>) y puede
+        lanzar Codex o Claude Code como subagentes.</p>
+    </div>
+    <div>
+      <h3>Nuestro patch</h3>
+<pre>- id: session-log-deepseek
+  disabled: true
+- insert:
+  - id: mcp-lab
+    name: '@deepseek-ai/dsh-mcp-client'
+    config:
+      serverName: lab
+      transport: stdio
+      command: .venv/bin/python
+      args: [-m, harness_lab.tools.mcp_server]</pre>
+      <h3>Desde Python</h3>
+<pre>dsh.run_task("Crea harness.docx ...")</pre>
+    </div>
+  </div>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/dsh.py">dsh.py · write_patch, run_task</a>
+    · <a href="https://github.com/deepseek-ai/deepseek-harness">github.com/deepseek-ai/deepseek-harness</a></p>
+</section>
+
+<!-- 6 -->
+<section class="slide">
+  <h2>Cómo lo montamos</h2>
+  <div class="flow">
+    <div class="box"><b>Notebook</b>tutorial.ipynb</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Harness</b>DeepSeek Harness<br>Codex · Claude Code</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Servidor local</b>/v1/messages<br>/v1/responses<br>/v1/chat/completions</div>
+    <div class="arrow">→</div>
+    <div class="box"><b>Qwen3.5-4B</b>bf16 · 9,3 GB<br>GPU de 16 GB (DGX)</div>
+  </div>
+  <div class="box dash"><b>Servidor MCP <code>lab</code> · los tres harnesses lo arrancan por stdio</b>
+    create_word_document · read_word_document · list_workspace · compare_checkpoints</div>
+  <ul>
+    <li>Un solo modelo cargado una vez; tres "sobres" de API distintos encima.</li>
+    <li>El modelo escribe <code>&lt;tool_call&gt;…</code>; el servidor lo convierte en JSON para cada API.</li>
+    <li>Cada petición se guarda: se ve exactamente qué mete cada harness en el contexto.</li>
+  </ul>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/server/app.py">server/app.py</a>
+    · <a class="code" href="../src/harness_lab/server/anthropic_messages.py">anthropic_messages.py</a>
+    · <a class="code" href="../src/harness_lab/server/openai_responses.py">openai_responses.py</a>
+    · <a class="code" href="../src/harness_lab/tools/mcp_server.py">tools/mcp_server.py</a></p>
+</section>
+
+<!-- 7 -->
+<section class="slide">
+  <h2>Una tool propia: documentos Word</h2>
+  <div class="cols">
+    <div>
+<pre>@server.tool()
+def create_word_document(
+    filename: str, markdown: str,
+    title: str = "",
+) -> str:
+    """Create a Word (.docx) document
+    from Markdown text."""
+    path = docx_tools.create_word_document(
+        filename, markdown, title)
+    return f"Saved {path}"</pre>
+    </div>
+    <div>
+      <ul>
+        <li>El modelo escribe Markdown, algo que cualquier LLM hace bien.</li>
+        <li>La tool lo convierte en <code>.docx</code> con python-docx: títulos, listas, negritas, tablas.</li>
+        <li>La <b>docstring</b> y los tipos son lo que el modelo lee: son parte del prompt.</li>
+        <li>Por MCP, la misma tool sirve en los tres harnesses: <code>mcp__lab__create_word_document</code>.</li>
+        <li>Ruta confinada al <code>workspace/</code>.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="ref">Código: <a class="code" href="../src/harness_lab/tools/docx_tools.py">tools/docx_tools.py</a>
+    · Tests: <a class="code" href="../tests/test_harnesses_e2e.py">test_harnesses_e2e.py</a> (dsh + MCP + Word, sin GPU)</p>
+</section>
+
+<!-- 8 -->
+<section class="slide">
+  <h2>Cuándo usar cada cosa</h2>
+  <table>
+    <tr><th>Usa…</th><th>Cuando</th><th>Ejemplos</th></tr>
+    <tr><td><b>Llamada directa</b></td><td>Una entrada, una salida. Necesitas control, latencia baja, coste predecible</td><td>Clasificar, extraer con structured output, resumir</td></tr>
+    <tr><td><b>Workflow fijo</b></td><td>Los pasos se conocen de antemano</td><td>RAG: recuperar → generar → citar (ARCA fase 3)</td></tr>
+    <tr><td><b>Harness</b></td><td>Tarea abierta, varios pasos, hay que mirar el resultado y decidir</td><td>Arreglar un test, analizar un repo, preparar un informe Word</td></tr>
+  </table>
+  <h3>Precio de un harness</h3>
+  <ul>
+    <li>Contexto: miles de tokens de system prompt y tools antes de tu pregunta.</li>
+    <li>Más llamadas, más latencia, resultados menos deterministas.</li>
+    <li>Riesgo: ejecuta acciones reales. Permisos y sandbox no son opcionales.</li>
+    <li>Un modelo de 4B se pierde con 25 tools: con modelos pequeños, pocas tools y bien descritas.</li>
+  </ul>
+  <p class="ref">Relación con ARCA: la fase 4 (bucle ReAct) es un harness escrito a mano.</p>
+</section>
+
+<!-- 9 -->
+<section class="slide">
+  <h2>Weight-space programming</h2>
+  <p>Un LLM frontera, dentro de un harness con kernel de Python y unas pocas <em>forward passes</em>
+    como tool, <b>lee y escribe los pesos</b> de otra red. Sin gradientes ni pérdida.</p>
+  <div class="cols">
+    <div>
+      <h3>Caso Qwen3.5-0.8B (según el post)</h3>
+      <ul class="small">
+        <li>Fallo: bucles hasta agotar 32k tokens (93 % de respuestas).</li>
+        <li>Edición: restar una dirección de 64 columnas de las MLP de las capas 15 y 19.
+          131.072 pesos, 0,016 % del modelo.</li>
+        <li>MATH-500 7,9 % → 48,1 % · GSM8K 13,8 % → 67,1 %.</li>
+        <li>En Gemma 3 270M, que no entra en bucles, no mejora: quita obstáculos, no añade capacidades.</li>
+      </ul>
+    </div>
+    <div>
+      <table class="small">
+        <tr><th></th><th>SFT / GRPO (ARCA)</th><th>Weight-space</th></tr>
+        <tr><td>Cambia</td><td>LoRA o todo</td><td>Unas columnas</td></tr>
+        <tr><td>Cómo</td><td>Gradientes</td><td>Un agente razona y edita</td></tr>
+        <tr><td>Señal</td><td>Datos, recompensa</td><td>Diagnóstico con pocas pasadas</td></tr>
+      </table>
+<pre>W[:, cols] -= u (uᵀ W[:, cols])</pre>
+      <p class="small">En el repo: <code>harness-wsp diff</code> lee la edición publicada;
+        <code>probe</code> mide bucles; <code>edit</code> aplica una edición con la misma forma,
+        también a vuestro Qwen3-0.6B + LoRA de ARCA.</p>
+    </div>
+  </div>
+  <p class="ref">Takehi, Teoh, Zhang, Khattab (MIT CSAIL, nov. 2026):
+    <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a>
+    · Código: <a class="code" href="../src/harness_lab/wsp/">wsp/</a></p>
+</section>
+
+<!-- 10 -->
+<section class="slide">
+  <h2>En la práctica</h2>
+<pre>source scripts/dgx_env.sh
+uv sync
+# abrir tutorial.ipynb con el kernel .venv/bin/python</pre>
+  <h3>Ejercicios</h3>
+  <ol>
+    <li>Añadir una tool al servidor MCP para vuestro tema de ARCA y usarla desde DeepSeek Harness.</li>
+    <li>Comparar en <code>outputs/traffic/</code> lo que envían los tres harnesses.</li>
+    <li>Repetir la tarea del Word con thinking activado: calidad frente a tiempo.</li>
+    <li>Medir los bucles de vuestro modelo de ARCA y probar una edición de pesos.</li>
+  </ol>
+  <h3>Referencias</h3>
+  <p class="small">
+    <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> ·
+    <a href="https://github.com/openai/codex">Codex CLI</a> ·
+    <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a> ·
+    <a href="https://huggingface.co/Qwen/Qwen3.5-4B">Qwen3.5-4B</a> ·
+    <a href="https://modelcontextprotocol.io">MCP</a> ·
+    <a href="https://rikiyat.github.io/blog/weight-space-programming/">Weight-space programming</a> ·
+    <a href="https://github.com/kendrickcetina/dgm-arca">ARCA</a>
+  </p>
+</section>
+
+<div id="nav">← → para navegar</div>
+<div id="counter"></div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1)) || 1) - 1));
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('active', k === i));
+    document.getElementById('counter').textContent = `${i + 1} / ${slides.length}`;
+    history.replaceState(null, '', '#' + (i + 1));
+  }
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End') show(slides.length - 1);
+  });
+  document.addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    show(e.clientX > window.innerWidth / 2 ? i + 1 : i - 1);
+  });
+  window.addEventListener('hashchange', () => show((parseInt(location.hash.slice(1)) || 1) - 1));
+  show(i);
+</script>
+</body>
+</html>

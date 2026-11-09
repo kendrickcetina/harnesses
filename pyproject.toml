@@ -23,7 +23,6 @@ dependencies = [
     "httpx>=0.28",
     "pydantic>=2.11",
     "pyyaml>=6.0",
-    "datasets>=3.0",
     "rich>=13.9",
     # Harnesses and tools
     "deepseek-harness-sdk==0.2.1rc2",
@@ -54,7 +53,6 @@ harness-download = "harness_lab.download:main"
 harness-serve = "harness_lab.server.app:main"
 harness-mcp = "harness_lab.tools.mcp_server:main"
 harness-dsh = "harness_lab.dsh:main"
-harness-wsp = "harness_lab.wsp.cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -53,21 +53,6 @@ def list_workspace() -> str:
     return docx_tools.list_workspace()
 
 
-@server.tool()
-def compare_checkpoints(base: str, edited: str, top: int = 10) -> str:
-    """Weight-space programming: list which tensors differ between two checkpoints.
-
-    Args:
-        base: Hugging Face repo id or local folder of the original model.
-        edited: repo id or folder of the edited model.
-        top: how many changed tensors to report.
-    """
-    from harness_lab.wsp.diff import compare_checkpoints as compare
-    from harness_lab.wsp.diff import format_report
-
-    return format_report(compare(base, edited)[:top])
-
-
 def main() -> None:
     # The harness may start us from any directory: keep paths anchored to the repo.
     os.chdir(Path(config.REPO_ROOT))

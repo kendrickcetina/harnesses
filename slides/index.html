@@ -36,6 +36,12 @@
   .arrow { align-self: center; font-size: 1.4em; }
   .ref { margin-top: 1.2em; font-size: .8em; color: var(--muted); }
   .ref a { color: var(--muted); }
+  ol { margin: .3em 0 .8em; padding-left: 1.4em; }
+  .fig { display: block; max-width: 100%; max-height: 44vh; margin: .6em 0; }
+  .diagram { display: block; width: 100%; max-height: 40vh; margin: .4em 0 .6em; }
+  .diagram text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .diagram .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  .diagram.geo { max-height: 26vh; }
   #counter { position: fixed; right: 2vw; bottom: 2vh; font-size: .7em; color: var(--muted); }
   #nav { position: fixed; left: 2vw; bottom: 2vh; font-size: .7em; color: var(--muted); }
   @media print {
@@ -339,157 +345,260 @@ def create_word_document(
 <section class="slide">
   <p class="muted">Aparte · no forma parte de la práctica de harnesses</p>
   <h2>Weight-space programming</h2>
-  <p class="lead">Mejorar un modelo <b>editando directamente sus pesos</b>, sin gradientes ni
-    entrenamiento: se diagnostica un fallo, se localiza en los pesos y se corrige con una
-    operación pequeña y explícita.</p>
-  <div class="flow">
-    <div class="box"><b>1. Diagnosticar</b>un fallo medible</div>
-    <div class="arrow">→</div>
-    <div class="box"><b>2. Localizar</b>qué capas y qué dirección</div>
-    <div class="arrow">→</div>
-    <div class="box"><b>3. Editar</b>pocas columnas</div>
-    <div class="arrow">→</div>
-    <div class="box"><b>4. Medir</b>en datos no usados</div>
-  </div>
-  <div class="cols">
-    <div>
-      <h3>El caso Qwen3.5-0.8B</h3>
-      <ul class="small">
-        <li><b>Fallo</b>: 85 de sus primeras 96 respuestas de práctica llegaban al límite de
-          32.768 tokens. El modelo entraba en bucles.</li>
-        <li><b>Dónde</b>: una dirección <code>u</code> que escriben las MLP de las capas 15 y 19.</li>
-        <li><b>Edición</b>: restar <code>u</code> de 64 columnas de cada una de esas MLP.
-          131.072 pesos: el 0,016 % del modelo.</li>
-      </ul>
-      <p class="small muted">En el post el diagnóstico lo hace un LLM grande que analiza los pesos
-        con código. Vosotros lo haréis con los scripts del repositorio.</p>
-    </div>
-    <div>
-      <h3>Resultado</h3>
-      <table class="small">
-        <tr><th></th><th>Base</th><th>Editado</th></tr>
-        <tr><td>MATH-500</td><td>7,9 %</td><td>48,1 %</td></tr>
-        <tr><td>GSM8K</td><td>13,8 %</td><td>67,1 %</td></tr>
-        <tr><td>IFEval</td><td>21,0 %</td><td>62,3 %</td></tr>
-        <tr><td>Respuestas al límite de tokens</td><td>93,0 %</td><td>33,1 %</td></tr>
-      </table>
-    </div>
-  </div>
-  <p class="ref">Takehi, Teoh, Zhang, Khattab (MIT CSAIL, 2 nov. 2026):
+  <p class="lead">Mejorar un modelo ya entrenado <b>editando directamente los números de sus
+    matrices de pesos</b>: sin gradientes, sin datos de entrenamiento y sin reentrenar.</p>
+  <img class="fig" src="img/wsp_teaser.png" alt="Las tres tareas del post: leer, arreglar y mejorar una red a partir de sus pesos.">
+  <p class="small">Los autores dan los pesos a un LLM de frontera (GPT-6 Astra) y le piden tres
+    cosas: <b>leer</b> qué hace una red, <b>arreglar</b> una que falla y <b>mejorar</b>
+    Qwen3.5-0.8B en matemáticas. Aquí nos interesa la tercera.</p>
+  <p class="ref">Figuras: Takehi, Teoh, Zhang, Khattab (MIT CSAIL, 2 nov. 2026),
     <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a></p>
 </section>
 
 <!-- 9b -->
 <section class="slide">
-  <h2>La edición, y lo que no puede hacer</h2>
+  <h2>Qué se edita: una matriz de pesos</h2>
+  <p>Un LLM es una pila de capas, y cada capa son matrices de números. Qwen3.5-0.8B tiene 24 capas
+    y 800 millones de pesos. La edición toca <b>dos matrices</b>: la <code>down_proj</code> de la
+    MLP de las capas 15 y 19.</p>
+  <svg class="diagram" viewBox="0 0 1000 300" role="img" aria-label="Pila de 24 capas; en las capas 15 y 19, la MLP termina en la matriz down_proj de 1024 por 3584, de la que se editan 64 columnas.">
+    <defs>
+      <pattern id="cell" width="9" height="18" patternUnits="userSpaceOnUse">
+        <rect width="9" height="18" fill="#e4e4e4" stroke="#fff" stroke-width="1.2"/>
+      </pattern>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#000"/>
+      </marker>
+    </defs>
+    <g font-size="14">
+      <!-- layer stack: layer 0 at the bottom -->
+      <g>
+        <rect x="20" y="274" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="263" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="252" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="241" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="230" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="219" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="208" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="197" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="186" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="175" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="164" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="153" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="142" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="131" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="120" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="109" width="90" height="8" fill="#000" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="98" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="87" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="76" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="65" width="90" height="8" fill="#000" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="54" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="43" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="32" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+        <rect x="20" y="21" width="90" height="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+      </g>
+      <text x="20" y="298">capa 0</text>
+      <text x="20" y="14">capa 23</text>
+      <text x="118" y="114" font-weight="bold">15</text>
+      <text x="118" y="70" font-weight="bold">19</text>
+      <!-- zoom into one layer -->
+      <line x1="112" y1="109" x2="165" y2="96" stroke="#000" stroke-dasharray="4 3"/>
+      <line x1="112" y1="117" x2="165" y2="200" stroke="#000" stroke-dasharray="4 3"/>
+      <rect x="165" y="96" width="410" height="104" fill="none" stroke="#000" stroke-dasharray="4 3"/>
+      <text x="175" y="88">MLP de la capa 15 (y de la 19)</text>
+      <rect x="180" y="122" width="105" height="52" fill="#fff" stroke="#000" stroke-width="2"/>
+      <text x="232" y="144" text-anchor="middle">entrada</text>
+      <text x="232" y="162" text-anchor="middle" class="mono">1024</text>
+      <line x1="285" y1="148" x2="318" y2="148" stroke="#000" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="320" y="122" width="115" height="52" fill="#fff" stroke="#000" stroke-width="2"/>
+      <text x="377" y="144" text-anchor="middle">neuronas</text>
+      <text x="377" y="162" text-anchor="middle" class="mono">3584</text>
+      <line x1="435" y1="148" x2="458" y2="148" stroke="#000" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="460" y="122" width="100" height="52" fill="#000"/>
+      <text x="510" y="144" text-anchor="middle" fill="#fff" font-weight="bold">W</text>
+      <text x="510" y="162" text-anchor="middle" fill="#fff" class="mono">down_proj</text>
+      <text x="370" y="226" text-anchor="middle">W escribe el resultado de la MLP en el flujo residual,</text>
+      <text x="370" y="244" text-anchor="middle">la "memoria de trabajo" que leen las capas siguientes.</text>
+      <!-- zoom into W -->
+      <line x1="560" y1="122" x2="621" y2="54" stroke="#000" stroke-dasharray="4 3"/>
+      <line x1="560" y1="174" x2="621" y2="270" stroke="#000" stroke-dasharray="4 3"/>
+      <rect x="621" y="54" width="360" height="216" fill="url(#cell)" stroke="#000" stroke-width="2"/>
+      <g fill="#000">
+        <rect x="657" y="54" width="9" height="216"/>
+        <rect x="720" y="54" width="9" height="216"/>
+        <rect x="792" y="54" width="9" height="216"/>
+        <rect x="864" y="54" width="9" height="216"/>
+        <rect x="918" y="54" width="9" height="216"/>
+      </g>
+      <text x="801" y="40" text-anchor="middle" font-weight="bold">W: 1024 filas × 3584 columnas</text>
+      <text x="801" y="290" text-anchor="middle">columna j: lo que escribe la neurona j (1024 números)</text>
+      <text x="996" y="160" text-anchor="middle" transform="rotate(90 996 160)">en negro: 64 columnas editadas</text>
+    </g>
+  </svg>
   <div class="cols">
     <div>
-      <h3>Qué se cambia</h3>
-      <p class="small">En cada capa, la MLP termina en <code>down_proj</code>: una matriz <code>W</code>
-        (hidden × intermediate). La columna <code>j</code> es lo que la neurona <code>j</code> escribe
-        en el flujo residual, la "memoria de trabajo" que leen las capas siguientes.</p>
-<pre>W[:, cols] -= u (uᵀ W[:, cols])</pre>
-      <p class="small">Tras la edición, esas neuronas ya no pueden escribir nada en la dirección
-        <code>u</code>. Es un cambio de rango 1, pequeño, reversible y fácil de leer
-        (<code>harness-wsp diff</code> lo muestra en los pesos publicados).</p>
-      <h3>Cómo se encuentra <code>u</code></h3>
-      <p class="small">Con una receta simple (<a class="code" href="../src/harness_lab/wsp/edit.py">wsp/edit.py</a>):
-        lo que escribe la MLP, de media, en las respuestas malas <b>menos</b> lo que escribe en las
-        buenas. Las columnas editadas son las que más escriben en esa dirección.</p>
+      <svg class="diagram geo" viewBox="0 0 420 210" role="img" aria-label="A la columna w se le resta su componente en la dirección u; la columna editada queda perpendicular a u.">
+        <g font-size="15">
+          <line x1="60" y1="170" x2="300" y2="170" stroke="#bbb" stroke-width="8"/>
+          <line x1="60" y1="170" x2="190" y2="170" stroke="#000" stroke-width="3" marker-end="url(#ah)"/>
+          <text x="196" y="196" font-weight="bold">u</text>
+          <line x1="60" y1="170" x2="300" y2="50" stroke="#000" stroke-width="2" marker-end="url(#ah)"/>
+          <text x="306" y="50">w<tspan font-size="11" dy="4">j</tspan><tspan dy="-4"> antes</tspan></text>
+          <line x1="300" y1="50" x2="300" y2="170" stroke="#000" stroke-dasharray="4 3"/>
+          <line x1="60" y1="170" x2="60" y2="52" stroke="#000" stroke-width="3" marker-end="url(#ah)"/>
+          <text x="68" y="46">w<tspan font-size="11" dy="4">j</tspan><tspan dy="-4"> después</tspan></text>
+          <text x="240" y="196" fill="#666">u (uᵀ w<tspan font-size="11" dy="4">j</tspan><tspan dy="-4">)</tspan></text>
+        </g>
+      </svg>
     </div>
     <div>
-      <h3>Límites (según los autores)</h3>
+<pre>W[:, cols] = W[:, cols] − u (uᵀ W[:, cols])</pre>
       <ul class="small">
-        <li><b>Quita obstáculos, no añade capacidades.</b> En Gemma 3 270M no consiguieron mejorar
-          MATH-500 (6,8 % → 7,7 %, sin significación).</li>
-        <li><b>Hace falta medir lo suficiente.</b> Con 10 o 25 pasadas de diagnóstico los bucles
-          apenas bajaban; hicieron falta 50.</li>
-        <li><b>No es perfecto.</b> Un tercio de las respuestas siguió llegando al límite.</li>
+        <li><code>u</code> es una dirección (un vector de 1024) del flujo residual. Los autores
+          la relacionan con los bucles: cuanto más escribe el modelo en <code>u</code>, más repite.</li>
+        <li>A cada columna se le resta su parte en la dirección <code>u</code> (en gris). Todo lo
+          demás que escribe esa neurona no cambia.</li>
+        <li>2 capas × 64 columnas × 1024 filas = <b>131.072 pesos, el 0,016 %</b> del modelo.</li>
       </ul>
-      <table class="small">
-        <tr><th></th><th>SFT / GRPO</th><th>Weight-space</th></tr>
-        <tr><td>Qué cambia</td><td>Todo el modelo o un LoRA</td><td>Unas pocas columnas</td></tr>
-        <tr><td>Cómo</td><td>Gradientes sobre una pérdida</td><td>Diagnóstico y una operación explícita</td></tr>
-        <tr><td>Necesita</td><td>Datos y horas de GPU</td><td>Un fallo medible y unos minutos</td></tr>
-        <tr><td>Se puede leer</td><td>Difícil</td><td>Sí: una dirección, unas capas</td></tr>
-      </table>
     </div>
   </div>
 </section>
 
 <!-- 9c -->
 <section class="slide">
-  <h2>Cómo usarlo para mejorar vuestro modelo de ARCA</h2>
-  <p>Encaja en la <b>fase 1, "Para ir más allá"</b>. Ya tenéis lo que hace falta: el modelo
-    (Qwen3-0.6B + vuestro LoRA), un <b>verificador</b> que dice qué respuestas fallan y
-    <b>pass@1</b> para medir.</p>
-  <table class="small">
-    <tr><th>Idea</th><th>La pregunta</th><th>Cómo</th></tr>
-    <tr><td><b>1. Quitar un fallo sistemático</b></td>
-      <td>¿Vuestro modelo se queda en bucle o se corta antes de responder? Es el caso del post.</td>
-      <td><code>harness-wsp edit --split loops</code>: la dirección separa las respuestas que se
-        cortan de las que terminan.</td></tr>
-    <tr><td><b>2. Subir pass@1</b></td>
-      <td>¿Hay una dirección que distinga los aciertos de los fallos?</td>
-      <td><code>harness-wsp edit --split errors</code>: aciertos frente a fallos según el verificador.
-        Más arriesgado: un fallo de conocimiento no se arregla quitando una dirección.</td></tr>
-    <tr><td><b>3. Dónde mirar</b></td>
-      <td>¿Qué tensores ha cambiado vuestro GRPO, y con qué rango? Es un buen sitio para buscar.</td>
-      <td><code>harness-wsp merge</code> fusiona el LoRA con el base; <code>harness-wsp diff</code> compara
-        los dos modelos tensor a tensor.</td></tr>
-    <tr><td><b>4. Editar frente a entrenar</b></td>
-      <td>¿Cuánto consigue una edición del 0,02 % de los pesos frente a SFT o GRPO?</td>
-      <td>Una tabla de pass@1: base · SFT · GRPO · GRPO + edición, con el coste de cada fila.</td></tr>
-  </table>
-  <p class="small muted">Lo que se valora es el análisis, no que la edición funcione: una edición que
-    no mejora, bien medida y explicada, también es un resultado (a los autores les pasó con Gemma).</p>
+  <h2>Resultado en Qwen3.5-0.8B</h2>
+  <div class="cols" style="grid-template-columns: 1.5fr 1fr; gap: 2em;">
+    <div>
+      <img class="fig" style="max-height: 52vh" src="img/wsp_benchmarks.png" alt="Benchmarks de Qwen3.5-0.8B antes y después de la edición, según las pasadas que pudo usar Astra.">
+      <p class="small muted">Eje x: cuántas pasadas hacia delante pudo usar Astra para diagnosticar.</p>
+    </div>
+    <div>
+      <p class="small"><b>El fallo:</b> 85 de sus primeras 96 respuestas de práctica llegaban al
+        límite de 32.768 tokens. El modelo entraba en bucle y no llegaba a responder.</p>
+      <table class="small">
+        <tr><th>Pasadas</th><th>MATH-500</th><th>Al límite</th></tr>
+        <tr><td>Base</td><td>7,9 %</td><td>93,0 %</td></tr>
+        <tr><td>10</td><td>12,3 %</td><td>87,2 %</td></tr>
+        <tr><td>25</td><td>14,1 %</td><td>86,4 %</td></tr>
+        <tr><td>50</td><td><b>48,1 %</b></td><td><b>33,1 %</b></td></tr>
+      </table>
+      <p class="small">Quitar el bucle mejora todo lo que dependía de terminar la respuesta, también
+        lo que no es matemáticas: IFEval sube de 21,0&nbsp;% a 62,3&nbsp;%.</p>
+    </div>
+  </div>
+  <p class="ref">Técnica de base: quitar un comportamiento borrando una sola dirección de los pesos
+    (Arditi et al., 2024, <a href="https://arxiv.org/abs/2406.11717">arXiv:2406.11717</a>).</p>
 </section>
 
 <!-- 9d -->
 <section class="slide">
-  <h2>Cómo hacerlo, paso a paso</h2>
+  <h2>Límites: lo que no puede hacer</h2>
   <div class="cols">
     <div>
-<pre class="small"># 1. Medir: aciertos, respuestas cortadas, bucles
-uv run harness-wsp probe \
-  --model Qwen/Qwen3-0.6B \
-  --adapter ../dgm-arca/rlm/weights/final_rlm_lora \
-  --n 64
-
-# 2. Editar: dirección en la capa 14, quitada
-#    de 64 columnas de las capas 14 y 20
-uv run harness-wsp edit \
-  --model Qwen/Qwen3-0.6B \
-  --adapter ../dgm-arca/rlm/weights/final_rlm_lora \
-  --split loops --layers 14 20 --columns 64
-# -> outputs/wsp/edited/ (modelo + wsp_edit.json)
-
-# 3. Evaluar en vuestro test (desde dgm-arca)
-uv run python -m rlm.evaluate \
-  --data rlm/data/test.jsonl \
-  --model ../harnesses/outputs/wsp/edited \
-  --adapters editado=none</pre>
+      <h3>Sí puede</h3>
+      <ul class="small">
+        <li>Quitar un comportamiento que depende de <b>una dirección concreta</b>: un bucle, un
+          error sistemático que se repite siempre igual.</li>
+        <li>Hacerlo tocando muy pocos pesos (0,016 %). El resto del modelo queda igual.</li>
+        <li>Hacerlo sin gradientes ni datos de entrenamiento: solo pasadas hacia delante para
+          diagnosticar.</li>
+      </ul>
     </div>
     <div>
-      <h3>Reglas del juego</h3>
+      <h3>No puede</h3>
       <ul class="small">
-        <li>La dirección se busca con <b>train</b>; el test solo sirve para medir.</li>
-        <li>Probad <b>varias capas</b> (Qwen3-0.6B tiene 28) y varios números de columnas. Una
-          tabla capas × pass@1 ya es un resultado.</li>
-        <li>Medid también <b>lo que empeora</b>: GSM8K como grupo de control.</li>
-        <li><code>probe</code> usa problemas de GSM8K con respuesta numérica. Para vuestro dominio,
-          adaptad <code>load_practice</code> y <code>extract_number</code> en
-          <a class="code" href="../src/harness_lab/wsp/probe.py">wsp/probe.py</a> a vuestro
-          <code>train.jsonl</code> y vuestro verificador.</li>
+        <li><b>Añadir una capacidad que el modelo no tiene.</b> En Gemma 3 270M, que casi no entra
+          en bucle, MATH-500 pasó de 6,8&nbsp;% a 7,7&nbsp;%: sin significación. Sus fallos eran cuentas y
+          pasos de álgebra mal hechos, repartidos, sin un componente que apagar.</li>
+        <li><b>Añadir conocimiento.</b> Si el modelo no sabe un dato, no hay dirección que quitar.</li>
+        <li><b>Funcionar con poco diagnóstico.</b> Con 10 o 25 pasadas los bucles casi no bajaron;
+          hicieron falta 50.</li>
+        <li><b>Arreglarlo todo.</b> Un tercio de las respuestas siguió llegando al límite.</li>
+        <li><b>Garantizar que no rompe otra cosa.</b> Hay que medirlo con un grupo de control.</li>
       </ul>
-      <h3>En <code>EXPERIMENTS.md</code></h3>
-      <p class="small">Fallo medido → hipótesis → dirección y capas → pesos tocados →
-        pass@1 antes/después → qué empeoró → por qué creéis que funciona (o no).</p>
     </div>
   </div>
-  <p class="ref">Código: <a class="code" href="../src/harness_lab/wsp/">src/harness_lab/wsp/</a>
-    (<code>probe</code>, <code>edit</code>, <code>merge</code>, <code>diff</code>) ·
-    ARCA: <a href="https://github.com/kendrickcetina/dgm-arca">github.com/kendrickcetina/dgm-arca</a></p>
+  <p class="small muted">Regla práctica: editar pesos quita un obstáculo que tapa una capacidad que
+    el modelo ya tiene. Para enseñarle algo nuevo hace falta SFT, GRPO o RAG.</p>
+</section>
+
+<!-- 9e -->
+<section class="slide">
+  <h2>Ejemplo: vuestro modelo de ARCA y las dosis por peso</h2>
+  <p>Vuestro Qwen3-0.6B con LoRA (SFT + GRPO) de la fase 1 calcula dosis pediátricas por peso. En
+    el análisis de fallos veis que se equivoca a menudo en problemas como este:</p>
+<pre>Amoxicilina 50 mg/kg/día repartida en 3 tomas. Niño de 14 kg. ¿Cuántos mg por toma?
+Correcto:  50 × 14 = 700 mg/día   →   700 / 3 = 233 mg por toma
+Modelo:    50 × 14 = 700          →   &lt;answer&gt;700 mg&lt;/answer&gt;     (no divide entre tomas)</pre>
+  <p>Primero hay que <b>clasificar los fallos</b>. Solo algunos se pueden atacar editando pesos:</p>
+  <table class="small">
+    <tr><th>Fallo (visto en train)</th><th>¿Weight-space?</th><th>Por qué</th></tr>
+    <tr><td>Se queda en bucle o no cierra <code>&lt;answer&gt;</code></td><td><b>Sí</b></td>
+      <td>Es el caso del post.</td></tr>
+    <tr><td>Da la dosis diaria como dosis por toma</td><td><b>Candidato</b></td>
+      <td>El mismo error en muchos problemas: puede haber una dirección detrás.</td></tr>
+    <tr><td>Confunde mg con mL de la suspensión</td><td><b>Candidato</b></td>
+      <td>Solo si se repite siempre de la misma forma.</td></tr>
+    <tr><td>Multiplica mal (14 × 50 = 750)</td><td>Poco probable</td>
+      <td>Errores repartidos, como en Gemma.</td></tr>
+    <tr><td>No sabe la dosis por kg del fármaco</td><td>No</td>
+      <td>Falta conocimiento: más datos de SFT, o RAG (fase 3).</td></tr>
+  </table>
+</section>
+
+<!-- 9f -->
+<section class="slide">
+  <h2>Cómo hacerlo, paso a paso</h2>
+  <div class="cols" style="grid-template-columns: 1fr 1.25fr; gap: 2.5em;">
+    <div>
+      <h3>Cómo lo hicieron los autores</h3>
+      <ol class="small">
+        <li>Un LLM (Astra) con una sesión de Python sobre los pesos, sin gradientes.</li>
+        <li>Un presupuesto de 10, 25 o 50 pasadas hacia delante sobre problemas de práctica (train
+          de GSM8K y MATH).</li>
+        <li>Lee las respuestas, ve los bucles y formula una hipótesis.</li>
+        <li>Busca la causa en los pesos y en las activaciones: una dirección que escriben las MLP de
+          las capas 15 y 19.</li>
+        <li>Resta esa dirección de 64 columnas de cada <code>down_proj</code>.</li>
+        <li>Se evalúa en benchmarks que Astra nunca vio.</li>
+      </ol>
+      <h3>Reglas del juego</h3>
+      <ul class="small">
+        <li>Buscad la dirección en <b>train</b>; el test solo sirve para medir.</li>
+        <li>Probad varias capas (Qwen3-0.6B tiene 28) y varios valores de <code>k</code>.</li>
+        <li>Medid lo que empeora: GSM8K como grupo de control.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Cómo podríais hacerlo (pseudocódigo)</h3>
+<pre class="small"># 0. Separar, con vuestro verificador, UN tipo de fallo
+fallos   = problemas de train donde da la dosis diaria
+aciertos = problemas de train parecidos que resuelve bien
+
+# 1. Leer qué escribe cada MLP en el token donde decide
+#    (justo antes de dividir, o de escribir &lt;answer&gt;)
+para cada capa:
+    a_f = media(salida_MLP(capa, fallos))
+    a_a = media(salida_MLP(capa, aciertos))
+    u[capa]   = normalizar(a_f - a_a)
+    sep[capa] = cuánto separa u fallos de aciertos
+capa = la de mayor sep
+
+# 2. Columnas de W = down_proj(capa) que más escriben en u
+cols = las k columnas con mayor |uᵀ W[:, j]|   (k = 64)
+
+# 3. Editar: quitar la dirección de esas columnas
+W[:, cols] -= u (uᵀ W[:, cols])
+
+# 4. Medir en test: pass@1, cuántos fallos de este tipo
+#    quedan, y el grupo de control</pre>
+      <p class="small muted">Una edición que no mejora, bien medida y explicada, también es un
+        resultado. A los autores les pasó con Gemma.</p>
+    </div>
+  </div>
+  <p class="ref">ARCA: <a href="https://github.com/kendrickcetina/dgm-arca">github.com/kendrickcetina/dgm-arca</a>
+    · Post: <a href="https://rikiyat.github.io/blog/weight-space-programming/">rikiyat.github.io/blog/weight-space-programming</a></p>
 </section>
 
 <div id="nav">← → para navegar</div>

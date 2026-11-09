@@ -13,8 +13,9 @@ Le añadimos una herramienta propia por MCP que genera **documentos Word**, y Co
 Excel ejecutando Python y escribe un informe.
 
 **Aparte**, sin relación con los harnesses: **weight-space programming**, mejorar un modelo
-editando sus pesos sin gradientes. Está en las slides y en `harness-wsp`, para probarlo con
-los modelos de ARCA.
+editando directamente sus matrices de pesos, sin gradientes. Está solo en las slides (qué es,
+sus límites y una idea para aplicarlo a vuestro modelo de ARCA). No hay código: lo
+implementáis vosotros.
 
 - Tutorial: [`tutorial.ipynb`](tutorial.ipynb) (en español)
 - Presentación: [`slides/index.html`](slides/index.html) (ábrela en el navegador)
@@ -51,9 +52,6 @@ export UV_PYTHON_INSTALL_DIR=~/clusters/dgx/.uv/python    # el Python al que apu
 uv run harness-download                 # Qwen3.5-4B (9,3 GB) al caché de Hugging Face
 uv run harness-serve                    # servidor local en http://127.0.0.1:8765/v1
 uv run harness-dsh "Crea un Word que explique qué es un harness"
-uv run harness-wsp diff                 # qué cambió la edición de weight-space programming
-uv run harness-wsp edit --model Qwen/Qwen3-0.6B --adapter <LoRA de ARCA> --split errors
-uv run harness-wsp merge --model Qwen/Qwen3-0.6B --adapter <LoRA de ARCA>   # para diff
 uv run pytest                           # tests offline: sin GPU ni descargas
 bash scripts/install_clis.sh            # opcional: Codex y Claude Code sin root
 ```
@@ -66,11 +64,11 @@ HARNESS_TEST_GPU=1 uv run pytest tests/test_notebook.py -k gpu -s   # notebook r
 ```
 
 - **Offline**: los tres protocolos del servidor, el parser de tool calls, las tools de Word,
-  DeepSeek Harness de verdad contra un modelo simulado, las utilidades de weight-space
-  programming y el notebook entero con `HARNESS_SCRIPTED=1`.
+  DeepSeek Harness de verdad contra un modelo simulado y el notebook entero con
+  `HARNESS_SCRIPTED=1`.
 - **GPU** (`-k gpu`, ~6 min): ejecuta `tutorial.ipynb` de principio a fin con Qwen3.5-4B y
   comprueba cada sección (tool calls reales, `.docx` creados por el harness mínimo y por
-  DeepSeek Harness vía MCP, informe `rank=1` de la edición publicada y la sonda de bucles).
+  DeepSeek Harness vía MCP).
   El notebook ejecutado queda en el directorio temporal de pytest (`tutorial.executed.ipynb`).
 - Codex y Claude Code: `HARNESS_TEST_CLIS=1 uv run pytest` si están instalados.
 
@@ -83,7 +81,6 @@ HARNESS_TEST_GPU=1 uv run pytest tests/test_notebook.py -k gpu -s   # notebook r
 | `src/harness_lab/dsh.py` | DeepSeek Harness apuntado al modelo local, con nuestras tools |
 | `src/harness_lab/clis.py` | Codex y Claude Code apuntados al modelo local |
 | `src/harness_lab/tools/` | Tools propias: Word con python-docx, servidor MCP |
-| `src/harness_lab/wsp/` | Weight-space programming: leer, medir y editar pesos |
 | `src/harness_lab/traffic.py` | Ver qué envía cada harness al modelo |
 | `tests/` | Tests offline con un modelo simulado y el notebook entero (simulado o en GPU) |
 
@@ -101,7 +98,7 @@ mete cada harness antes de vuestra pregunta.
 **No se usa ningún servicio externo de modelos.** "OpenAI" y "Anthropic" son aquí solo
 *formatos de API*: todas las peticiones van al servidor local y las responde Qwen. El
 paquete `openai` (en `mini_harness.py` y el notebook) es una librería cliente HTTP apuntada a
-`http://127.0.0.1:8765/v1`, y `openai/gsm8k` es un dataset de Hugging Face.
+`http://127.0.0.1:8765/v1`.
 
 ## Notas
 

@@ -14,10 +14,6 @@ MODEL_ID = os.environ.get("HARNESS_MODEL", "Qwen/Qwen3.5-4B")
 # Small model for quick tests on a laptop CPU/MPS.
 SMALL_MODEL_ID = "Qwen/Qwen3.5-0.8B"
 
-# Models used in the weight-space programming section.
-WSP_BASE_MODEL_ID = "Qwen/Qwen3.5-0.8B"
-WSP_EDITED_MODEL_ID = "RikiyaT/Qwen3.5-0.8B-weight-space-programming"
-
 HOST = os.environ.get("HARNESS_HOST", "127.0.0.1")
 # Not 8000: on the DGX a shared vLLM already listens there.
 PORT = int(os.environ.get("HARNESS_PORT", "8765"))

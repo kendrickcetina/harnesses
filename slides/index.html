@@ -512,6 +512,8 @@ def create_word_document(
           en bucle, MATH-500 pasó de 6,8&nbsp;% a 7,7&nbsp;%: sin significación. Sus fallos eran cuentas y
           pasos de álgebra mal hechos, repartidos, sin un componente que apagar.</li>
         <li><b>Añadir conocimiento.</b> Si el modelo no sabe un dato, no hay dirección que quitar.</li>
+        <li><b>Funcionar sin un editor fuerte.</b> El diagnóstico lo hizo un modelo de frontera con
+          razonamiento máximo durante 20 horas. Un modelo pequeño no sabe hacerlo.</li>
         <li><b>Funcionar con poco diagnóstico.</b> Con 10 o 25 pasadas los bucles casi no bajaron;
           hicieron falta 50.</li>
         <li><b>Arreglarlo todo.</b> Un tercio de las respuestas siguió llegando al límite.</li>
@@ -549,64 +551,79 @@ Modelo:    50 × 14 = 700          →   &lt;answer&gt;700 mg&lt;/answer&gt;    
 
 <!-- 9f -->
 <section class="slide">
-  <h2>Cómo hacerlo, paso a paso</h2>
-  <p class="small">Hay <b>dos modelos</b>, con papeles distintos. El <b>modelo editado</b> es el
-    vuestro: Qwen3-0.6B con vuestro LoRA. El <b>editor</b> decide qué pesos cambiar. En el post el
-    editor es otro LLM (GPT-6 Astra); en la ruta B el editor sois vosotros, con una receta fija.</p>
-  <div class="cols" style="gap: 2em;">
+  <h2>Qué hicieron exactamente los autores</h2>
+  <p class="small">Hay <b>dos modelos</b>. El <b>editor</b> es un modelo de frontera que decide qué
+    pesos cambiar: <code>gpt-6-astra</code> (OpenAI), con razonamiento <code>max</code>. El
+    <b>modelo editado</b> es Qwen3.5-0.8B. Un script propio (el <i>driver</i>) los conecta.</p>
+  <div class="cols" style="grid-template-columns: 1fr 1.1fr; gap: 2em;">
     <div>
-      <h3>A. Como en el post: un LLM como editor</h3>
-<pre class="small">modelo = Qwen3-0.6B + vuestro LoRA    # el que se edita
-editor = un LLM fuerte que ejecute Python
-         (Claude, GPT...; Qwen-4B se queda corto)
+      <h3>El bucle del driver</h3>
+<pre class="small">mensaje = PROMPT_DE_LA_TAREA
+while pasadas_usadas &lt; 50:
+    # el editor: un modelo de frontera
+    respuesta = codex exec --model gpt-6-astra \
+                  -c model_reasoning_effort=max
+                  # (tools de Codex apagadas)
+    bloque = el único bloque de la respuesta
 
-# Lo que el editor puede hacer (sin gradientes)
-pasada(prompts)        # respuestas + activaciones
-                       # presupuesto: 50 pasadas
-leer_pesos(nombre)
-escribir_pesos(nombre, tensor)
+    if bloque es ```python:
+        salida = kernel.run(bloque)
+        # CPU, sobre los pesos; sin GPU
+    if bloque es ```forward:
+        salida = servidor_gpu(bloque)
+        # Qwen genera o lee; gasta 1 pasada
+    mensaje = salida
 
-tarea = """Mejora el cálculo de dosis por toma
-editando pesos. Tienes train y el verificador."""
-                       # el test NO se lo dais
-
-repetir hasta agotar el presupuesto:
-    el editor lee fallos y formula una hipótesis
-    mira pesos y activaciones para localizarla
-    edita y comprueba en train
-
-guardar modelo editado
-medir en test   # lo hacéis vosotros, no el editor</pre>
+entregar los tensores de /work/edited</pre>
     </div>
     <div>
-      <h3>B. A mano: vosotros como editor</h3>
-<pre class="small">modelo = Qwen3-0.6B + vuestro LoRA
-
-# 0. Con el verificador, UN tipo de fallo
-fallos   = train donde da la dosis diaria
-aciertos = train parecidos que resuelve bien
-
-# 1. Lo que escribe cada MLP donde decide
-#    (justo antes de dividir o de &lt;answer&gt;)
-para cada capa:
-    a_f = media(salida_MLP(capa, fallos))
-    a_a = media(salida_MLP(capa, aciertos))
-    u[capa]   = normalizar(a_f - a_a)
-    sep[capa] = cuánto separa u los dos grupos
-capa = la de mayor sep
-
-# 2. Columnas de W = down_proj(capa)
-cols = k columnas con mayor |uᵀ W[:, j]|  # k = 64
-
-# 3. Editar
-W[:, cols] -= u (uᵀ W[:, cols])
-
-# 4. Medir en test + grupo de control</pre>
+      <h3>Lo que tenía el editor</h3>
+      <table class="small">
+        <tr><td><b>Kernel</b></td><td>Python persistente, CPU. <code>load</code>,
+          <code>save_edit</code>, <code>tok</code>. Hasta 300 ejecuciones.</td></tr>
+        <tr><td><b>Pasadas</b></td><td>50. <i>Generate</i>: Qwen responde hasta 512 problemas,
+          original y editado a la vez, y devuelve la diferencia de aciertos. <i>Teacher-forced</i>:
+          lee 1.024 textos y devuelve activaciones.</td></tr>
+        <tr><td><b>Datos</b></td><td>Train de GSM8K (7.469) y MATH (7.275). Nunca los benchmarks.</td></tr>
+        <tr><td><b>Prohibido</b></td><td>Gradientes, ejecutar el modelo en el kernel, internet,
+          tocar embeddings o la norma final.</td></tr>
+        <tr><td><b>Coste</b></td><td>158 turnos, 80 ejecuciones de Python, 20 horas.</td></tr>
+      </table>
     </div>
   </div>
-  <p class="small muted">En las dos rutas: buscad en train y medid en test, con GSM8K como control.
-    Una edición que no mejora, bien medida, también es un resultado.
-    · <a href="https://github.com/kendrickcetina/dgm-arca">ARCA</a></p>
+  <p class="ref">Logs completos (prompt, cada turno, el código y la edición):
+    <a href="https://github.com/RikiyaT/lm_understand-logs/tree/main/exp8_math">github.com/RikiyaT/lm_understand-logs/exp8_math</a></p>
+</section>
+
+<!-- 9g -->
+<section class="slide">
+  <h2>Cómo adaptarlo a vuestro modelo de ARCA</h2>
+  <p class="small">Copiad el montaje de los autores y cambiad solo lo imprescindible. <b>El editor
+    tiene que ser un modelo de frontera</b>: ningún Qwen pequeño (tampoco el de 4B de este
+    repositorio) sabe diagnosticar pesos.</p>
+  <table class="small">
+    <tr><th></th><th>Autores</th><th>Vosotros</th></tr>
+    <tr><td><b>Editor</b></td><td><code>gpt-6-astra</code>, razonamiento <code>max</code></td>
+      <td>El modelo de frontera más fuerte al que tengáis acceso, con el razonamiento al máximo.
+        Por API o por su CLI (Codex, Claude Code), con sus tools apagadas.</td></tr>
+    <tr><td><b>Driver</b></td><td>Script propio: un bloque por turno</td>
+      <td>Igual. Lo escribís vosotros: llama al editor, ejecuta su bloque y le devuelve la salida.</td></tr>
+    <tr><td><b>Modelo editado</b></td><td>Qwen3.5-0.8B</td>
+      <td>Qwen3-0.6B con vuestro LoRA <b>fusionado</b>: se editan los pesos finales.</td></tr>
+    <tr><td><b>Pasadas</b></td><td>Servidor vLLM en GPU</td>
+      <td>Vuestro servidor en la GPU de la DGX, con el mismo protocolo que <code>rlm/evaluate.py</code>.</td></tr>
+    <tr><td><b>Datos</b></td><td>Train de GSM8K y MATH</td>
+      <td>Vuestro <code>train.jsonl</code> de dosis, corregido con vuestro verificador.</td></tr>
+    <tr><td><b>Prompt</b></td><td>"Hazlo mejor en matemáticas"</td>
+      <td>El prompt de los autores, cambiando modelo, datos y métrica: "mejóralo en dosis por peso".</td></tr>
+    <tr><td><b>Presupuesto</b></td><td>10, 25 y 50 pasadas</td>
+      <td>50. Con 10 o 25 los autores casi no mejoraron.</td></tr>
+    <tr><td><b>Evaluación</b></td><td>Benchmarks que el editor nunca vio</td>
+      <td>Vuestro <code>test.jsonl</code>, sin enseñárselo al editor, y GSM8K como control.</td></tr>
+  </table>
+  <p class="small muted">Punto de partida: el prompt de los autores en
+    <a href="https://github.com/RikiyaT/lm_understand-logs/blob/main/exp8_math/runs/p50c/turns/t001/prompt.txt">exp8_math/runs/p50c/turns/t001/prompt.txt</a>.
+    Contad con el coste: unos 160 turnos de un modelo de frontera.</p>
 </section>
 
 <div id="nav">← → para navegar</div>
